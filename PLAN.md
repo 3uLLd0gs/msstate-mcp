@@ -1,4 +1,6 @@
-# MSU Policies MCP Server — Plan (v5)
+# MSU Policies MCP Server — Plan (v6)
+
+> **What changed from v5:** added a **Roadmap / future sources** section. The architecture's site-isolation design (one source module per dataset under `src/sources/`) is now explicitly framed as supporting multi-source expansion; **MSU's master course catalog is the planned v2.0 second source.** Adoption metrics that v1–v5 framed as v1 gates (activation %, weekly install signals) are downgraded to *observational* — accuracy is now the only kill-gate, consistent with the v5 portfolio framing. Out-of-scope expansion sources (live enrollment, GPA averages) are named explicitly so the safety contract stays clean as we add datasets.
 
 > **What changed from v4:** project framing is now explicit — this is a **portfolio / learning piece** plus a **reusable ".edu policy MCP" template**, not a product chasing adoption. Demand for an MSU-specific tool is unvalidated and the realistic audience is small (dozens, not thousands). We optimize for build quality, eval rigor, and template portability instead. Site-specific scraping logic is isolated to one module (`src/sources/msstate.ts`) so the rest of the codebase can be reused for any Drupal-based policy site. Adoption metrics are kept as observational ("are we surprised?") rather than as gates; accuracy and code quality are the real bars.
 
@@ -63,21 +65,23 @@ The 99.99% bar lives in three places in the design, not just in the eval:
 
 We do not claim 99.99% to users. The README quotes the eval-measured numbers honestly.
 
-### Other v1 metrics
+### Observational metrics (watched, not gated)
 
-1. **Activation:** % of installs that issue ≥1 successful `tools/call` within 24h. Target ≥ 60%.
-2. **Time-to-answer:** p50 wall-clock from `chain_find_relevant_policies` invocation → return. Target < 6s warm, < 12s cold.
-3. **Stale-content incidents:** count of cases where cache served text from a revision superseded by a newer one in the live index. Target = 0; log-level `error` if > 0.
-4. **Weekly active questions:** opt-in anonymous counter (off by default), or npm download trend + Claude Project zip download count + GitHub stars/issues as proxy.
+These are interesting to watch but **none of them gate the project** — that's what the v5 portfolio framing means in practice. We track them so we're not surprised, not so we ship/kill on them.
+
+1. **Activation:** % of installs that issue ≥1 successful `tools/call` within 24h. Watched out of curiosity.
+2. **Time-to-answer:** p50 wall-clock from `chain_find_relevant_policies` invocation → return. We aim for < 6s warm because slow tools degrade UX, but missing this isn't a kill condition.
+3. **Stale-content incidents:** count of cases where cache served text from a revision superseded by a newer one in the live index. Logged at level `error` so we notice; not a gate.
+4. **Install / use signals:** npm download trend + Claude Project zip download count + GitHub stars/issues. Watched, not targeted. Since the audience is realistically dozens, low numbers don't mean failure.
 
 ### Kill criteria
 
-If 60 days post-launch:
-- Retrieval correctness < 95% on the eval, OR
-- Any answer-correctness errors persist across two consecutive eval runs that aren't a stale-content fluke, OR
-- < 25 weekly install-and-use signals,
+The only thing that kills this project is failing the accuracy bars. If, 60 days post-launch:
 
-then sunset the project or pivot to the hosted web surface.
+- Retrieval correctness drops below 95% on the eval, OR
+- Any answer-correctness errors persist across two consecutive eval runs that aren't a stale-content fluke,
+
+then sunset or pivot. We deliberately do **not** kill on install or adoption signals — the v5 framing says this project's job is to be well-built and well-evaluated, not to win adoption. Low usage with passing eval = a working portfolio piece + reusable template, which is the target deliverable.
 
 ## Distribution — dual mode (plugin + plain MCP)
 
@@ -377,6 +381,51 @@ In `msstate-policies/`:
 7. Plugin path: `/plugin marketplace add ./` → `/plugin install msstate-policies` → ask "what's the policy on amnesty?" — Claude calls `chain_find_relevant_policies`, gets full policy text, answers citing OP number + URL + retrieval timestamp.
 8. MCP path: drop the JSON snippet from `examples/claude_desktop_config.json` into Claude Desktop, restart, repeat.
 9. Commit (including `dist/index.js`, `eval/audit-*.csv`, `eval/eval-*.json`) and push to `claude/msu-policies-mcp-UlB5L` (now merged into `claude/add-autoresearch-skill-BEzMA`).
+
+## Roadmap — future sources (post-v1.0)
+
+The v5 reframe isolated all site-specific code to `src/sources/<site>.ts` so adding new datasets is cheap. **v1.0 ships policies only.** Once it's stable, eval-passing, and on the marketplace, we expand. The point of having a roadmap here is so the v1.0 architecture choices don't accidentally paint us into a corner — not so we build any of this now.
+
+### v2.0: MSU master course catalog
+
+The natural second source. Course questions are *more* common than policy questions for the average student ("what are CSE 1284's prereqs?", "is MA 1713 offered in fall?", "what counts as a humanities elective?"). Adding it both raises real user value and validates the template story (one repo, two real datasets reusing the same framework).
+
+**What's reused from v1.0:** MCP plumbing, eval harness, packaging, version-sync, CI, embedding pipeline, README/disclaimer pattern. New code is confined to `src/sources/msstate-courses.ts` plus a new tool surface.
+
+**What's different (worth flagging now so we don't blunder into it):**
+
+| Dimension | Policies (v1.0) | Course catalog (v2.0) |
+|---|---|---|
+| **Data shape** | Long-form prose in PDFs | Structured records (code, title, credits, prereqs, description, terms offered) |
+| **Typical query** | "What does the residency policy say?" | "All 3-credit MA courses", "what are CSE 1284's prereqs?", "what counts as humanities credit?" |
+| **Tools** | `search_policies`, `get_policy`, `chain_find_relevant_policies` (text retrieval) | `find_courses(filters)`, `get_prereq_chain`, `search_courses(text)` (filter + graph + text) |
+| **Retrieval** | Hybrid BM25 + embeddings on prose chunks | Structured filtering on fields + text search on descriptions |
+| **Freshness** | Annual-ish — weekly scrape is fine | Per-term — schedule changes, cancellations, new sections |
+| **Accuracy bar** | 99.99% (wrong policy info → real harm) | ~95% (wrong prereq is annoying, recoverable) |
+
+So the existing scraper, retrieval, and tool design **don't all transfer**. The course module needs a different scraper, a structured index, and a new tool surface — only the framework around it is reused. That's fine; that's what the framework is for.
+
+**Scope boundary (matters for the safety contract):**
+
+The catalog answers *static* questions only. Live data is explicitly out of scope, and the v2.0 tool descriptions must tell Claude to refuse + redirect for these:
+
+- ✅ Catalog can answer: prereqs, credits, course descriptions, requirements for a major, what counts as a humanities elective.
+- ❌ Catalog can't answer (redirect to authoritative source): "Is there a seat open in MA 1713?" → Banner; "Who's teaching CSE 1284 next semester?" → Schedule of Classes; "What's the average GPA in HI 1063?" → GradeData (not catalog data, separately scraped if ever).
+
+Naming the off-limits questions in the tool description prevents the LLM from fabricating answers when users ask them.
+
+### Sequencing
+
+**Don't parallelize.** Ship policies as v1.0 first, hit the eval bars, get it on Claude Code marketplace, watch what breaks, fix. *Then* start v2.0. The course module should inherit lessons learned from v1.0 rather than relearn them in parallel — and we want v1.0 to be smaller and well-built rather than bigger and rushed.
+
+### Other natural sources later (sketch only)
+
+- **Academic calendar** (deadlines, term dates) — small structured corpus, weekly scrape. Probably its own source module.
+- **Financial aid deadlines** — overlaps with policies; may belong inside the policies source rather than as a separate one. Decide when we get there.
+- **Library / building hours** — small but possibly real-time enough that an MCP isn't the right shape.
+- **Other .edu sites** (any university running Drupal-based policy publishing) — the *template* story. Replace `src/sources/msstate.ts` with `src/sources/<other-school>.ts`, retune the eval set, ship.
+
+Each new source = a new `src/sources/<name>.ts` module + new tools + new fixtures + new eval slice. The framework stays untouched. Whether that holds when we actually build v2.0 is the real test of whether the v5 reframe was right.
 
 ## Open Risks
 
