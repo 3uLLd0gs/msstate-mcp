@@ -1,4 +1,6 @@
-# MSU Policies MCP Server — Plan (v4)
+# MSU Policies MCP Server — Plan (v5)
+
+> **What changed from v4:** project framing is now explicit — this is a **portfolio / learning piece** plus a **reusable ".edu policy MCP" template**, not a product chasing adoption. Demand for an MSU-specific tool is unvalidated and the realistic audience is small (dozens, not thousands). We optimize for build quality, eval rigor, and template portability instead. Site-specific scraping logic is isolated to one module (`src/sources/msstate.ts`) so the rest of the codebase can be reused for any Drupal-based policy site. Adoption metrics are kept as observational ("are we surprised?") rather than as gates; accuracy and code quality are the real bars.
 
 > **What changed from v3:** no privileged persona — the audience is the **MSU community broadly** (students, staff, faculty). The accuracy north star is **99.99%**, decomposed into measurable sub-metrics (retrieval correctness, answer correctness, refusal correctness) because no single eval can measure 99.99% directly. Tool descriptions now enforce "quote verbatim when stakes are high, refuse if uncertain" — the only realistic path to that bar with an LLM in the loop.
 
