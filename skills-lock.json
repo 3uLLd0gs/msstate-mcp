@@ -4,7 +4,7 @@
     "autoresearch": {
       "source": "uditgoenka/autoresearch",
       "sourceType": "github",
-      "skillPath": ".agents/skills/autoresearch/SKILL.md",
+      "skillPath": ".claude/skills/autoresearch/SKILL.md",
       "computedHash": "0ec214c745b2a76b9501102f74fd3dfd9e43af2ba8f9dffbe4bebf8367dc8073"
     }
   }
