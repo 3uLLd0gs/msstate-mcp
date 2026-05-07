@@ -1,0 +1,32 @@
+{
+  "name": "msstate-policies-mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing Mississippi State University Operating Policies (https://www.policies.msstate.edu/current).",
+  "type": "module",
+  "bin": {
+    "msstate-policies-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsc --noEmit --watch",
+    "start": "node dist/index.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "cheerio": "^1.0.0",
+    "turndown": "^7.2.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/turndown": "^5.0.5",
+    "esbuild": "^0.23.0",
+    "typescript": "^5.5.0"
+  },
+  "keywords": ["mcp", "msu", "mississippi-state", "policies", "operating-policies"],
+  "license": "MIT"
+}
