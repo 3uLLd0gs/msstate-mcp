@@ -215,9 +215,23 @@ async function callAnthropic(question, policies) {
 }
 
 // ---- OpenAI answerer (uses Responses API + MCP tool pointed at Worker) ---
+// `instructions` mirrors the steering the Anthropic eval branch gets implicitly
+// (k=5 from the eval harness; refusal discipline from chain_find_relevant_policies'
+// own description). Without it, gpt-4o defaults the chain tool's k to its
+// schema default (2) — making OpenAI runs unfairly retrieval-starved vs. the
+// Sonnet baseline at k=5 — and treats off-topic questions conversationally
+// instead of refusing.
+const OPENAI_INSTRUCTIONS = `You answer questions about Mississippi State University Operating Policies using the msstate-policies MCP server.
+
+Rules:
+1. When calling chain_find_relevant_policies, always pass k=5 (the maximum) so the model sees a wider candidate set.
+2. If the question is not about MSU policies (e.g., weather, sports scores, news, current events, individuals' personal info), refuse plainly: state that this server only covers Mississippi State University Operating Policies and suggest contacting an appropriate alternative source. Do not invent a policy or speculate.
+3. Quote verbatim from policy text and cite the OP number + canonical URL for any normative claim.`;
+
 async function callOpenAIWithMcp(question) {
   const res = await openaiClient.responses.create({
     model: openaiModel,
+    instructions: OPENAI_INSTRUCTIONS,
     tools: [
       {
         type: "mcp",
