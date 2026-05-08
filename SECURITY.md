@@ -1,5 +1,7 @@
 # Security Policy
 
+> **For maintainers / Claude sessions touching this repo:** before changing security-shaped code, also read [`CLAUDE.md`](CLAUDE.md) (especially `## Reading order` and `## Security notes`) and [`autoresearch_security.md`](autoresearch_security.md) (round-2 audit + per-finding resolution). The `## Out of scope: client-side circumvention` section below is authoritative for what we do NOT defend against.
+
 ## Reporting a Vulnerability
 
 If you find a security issue in `msstate-mcp` or the deployed Cloudflare Worker at `https://msstate-policies-mcp.mminsub90.workers.dev`, please report it privately rather than filing a public GitHub issue.

@@ -2,6 +2,17 @@
 
 This file is loaded automatically by Claude Code when it operates in this repo. Read it before doing anything else.
 
+## Reading order before non-trivial changes
+
+For non-trivial work — and ALWAYS before touching anything security-shaped (Worker code, build chain, `dist/` regeneration, dependency bumps, CORS, error paths, logging, file modes, CI workflow, `tools/security-checklist.sh`) — read in this order:
+
+1. **`CLAUDE.md`** (this file) — load-bearing rules: corpus rule, stderr-only logging, security-score contract. The `## Security notes (round-2 closure 2026-05-08)` section near the bottom lists specific patterns that must not regress.
+2. **`SECURITY.md`** — what's in scope, what's NOT, and especially `## Out of scope: client-side circumvention`. That section defines the user-side abuse classes we explicitly *don't* defend against (local edits to the bundle, prompt-level circumvention, fork-the-corpus, LLM hallucination, indirect injection inside published PDFs). Treat anything matching those bullets as `wontfix` by design.
+3. **`autoresearch_security.md`** — round-2 audit + per-finding resolution table with commit SHAs. Useful for "why does the code look like this?" / "is this still load-bearing?" questions.
+4. **`docs/BUILD.md`** — architecture, decision history, deferred items (M1/M2/M6), eval methodology, threat model.
+
+After any change in scope, run `bash tools/security-checklist.sh | tail -1` and confirm the score is still **192**. CI hard-gates on `>= 100`; below 192 means a check regressed.
+
 ## What this repo is
 
 `msstate-mcp` is a Model Context Protocol server that exposes **Mississippi State University Operating Policies** (the `/current` index at <https://www.policies.msstate.edu/current>) to MCP-capable clients (Claude Code, Claude Desktop, Cursor, Windsurf, Zed, claude.ai connector). For project overview, architecture, decision history, eval methodology, and open issues, see [`docs/BUILD.md`](./docs/BUILD.md). Read it once before non-trivial work.
