@@ -72,6 +72,20 @@ const JUDGE_OUTPUT_PRICE_PER_M = MODELS[modelKey].out;
 const HARD_BUDGET_USD = 4.0;
 const POLICY_TEXT_CHAR_CAP = 3000;
 
+// ---- OpenAI answering model (optional) -----------------------------------
+const openaiModel = arg("openai-model", null);
+const WORKER_URL = "https://msstate-policies-mcp.mminsub90.workers.dev/mcp";
+let openaiClient = null;
+if (openaiModel && openaiModel !== true) {
+  if (!process.env.OPENAI_API_KEY) {
+    console.error("run-eval: --openai-model set but OPENAI_API_KEY missing");
+    process.exit(1);
+  }
+  const { default: OpenAI } = await import("openai");
+  openaiClient = new OpenAI();
+  console.error(`run-eval: OpenAI answering branch enabled (model=${openaiModel})`);
+}
+
 console.error(
   `run-eval: ${questions.length} questions, k=${overrideK ?? "per-question"}, judge=${useJudge ? "on" : "off"}`,
 );
@@ -144,6 +158,19 @@ ANSWER: <your answer to the user, following rules 1-3>
 ASSESSMENT: <a single line of compact JSON, no surrounding text or markdown>
 {"cited_op_numbers":["NN.NN", ...], "refused": true|false, "quoted_verbatim": true|false}`;
 
+// Judge-only prompt: used when the answer was produced by another model
+// (e.g. GPT-4o via OpenAI Responses API + MCP). Sonnet doesn't re-answer; it
+// only assesses the supplied answer against the supplied policies.
+const JUDGE_ONLY_PROMPT = `You are evaluating whether an AI-generated answer about Mississippi State University Operating Policies is correctly grounded in the provided policy text.
+
+Output a single line of compact JSON, no surrounding text or markdown:
+{"cited_op_numbers":["NN.NN", ...], "refused": true|false, "quoted_verbatim": true|false}
+
+Where:
+- cited_op_numbers: OP numbers explicitly cited in the answer (strings like "91.208").
+- refused: true if the answer declines to answer (e.g. "no policy applies", "outside scope").
+- quoted_verbatim: true if the answer contains direct quoted text from the provided policies.`;
+
 let totalInputTokens = 0;
 let totalOutputTokens = 0;
 function currentSpend() {
@@ -187,6 +214,76 @@ async function callAnthropic(question, policies) {
   return { text, usage: json.usage };
 }
 
+// ---- OpenAI answerer (uses Responses API + MCP tool pointed at Worker) ---
+async function callOpenAIWithMcp(question) {
+  const res = await openaiClient.responses.create({
+    model: openaiModel,
+    tools: [
+      {
+        type: "mcp",
+        server_label: "msstate-policies",
+        server_url: WORKER_URL,
+        require_approval: "never",
+      },
+    ],
+    input: question,
+  });
+  // Extract: (1) results array from chain_find_relevant_policies, (2) final answer text.
+  let returned = [];
+  let answerText = "";
+  for (const item of res.output ?? []) {
+    if (item.type === "mcp_call" && item.name === "chain_find_relevant_policies") {
+      try {
+        const out = JSON.parse(item.output ?? "{}");
+        if (Array.isArray(out.results)) returned = out.results;
+      } catch {
+        /* ignore */
+      }
+    }
+    if (item.type === "message" && Array.isArray(item.content)) {
+      for (const c of item.content) {
+        if (c.type === "output_text" && typeof c.text === "string") {
+          answerText += c.text;
+        }
+      }
+    }
+  }
+  return { returned, answerText, usage: res.usage };
+}
+
+async function judgeOpenAIAnswer(question, policies, answerText) {
+  const policyBlocks = policies
+    .map(
+      (p, i) =>
+        `--- Policy ${i + 1} (OP ${p.number}: ${p.title}) ---\n${(p.text || "").slice(0, POLICY_TEXT_CHAR_CAP)}`,
+    )
+    .join("\n\n");
+  const userPrompt = `Question: ${question}\n\nPolicies provided to the answerer:\n\n${policyBlocks}\n\nAnswer to evaluate:\n${answerText}`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": process.env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: JUDGE_MODEL,
+      max_tokens: 250,
+      system: JUDGE_ONLY_PROMPT,
+      messages: [{ role: "user", content: userPrompt }],
+    }),
+  });
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => "");
+    throw new Error(`Anthropic ${res.status}: ${errBody.slice(0, 200)}`);
+  }
+  const json = await res.json();
+  totalInputTokens += json.usage?.input_tokens ?? 0;
+  totalOutputTokens += json.usage?.output_tokens ?? 0;
+  return (json.content?.[0]?.text || "").trim();
+}
+
 function parseAssessment(modelText) {
   const m = modelText.match(/ASSESSMENT:\s*(\{[\s\S]*?\})/);
   if (!m) return null;
@@ -199,9 +296,9 @@ function parseAssessment(modelText) {
 
 // ---- main ----------------------------------------------------------------
 async function main() {
-  const client = new McpClient();
+  const client = openaiClient ? null : new McpClient();
   try {
-    await client.init();
+    if (client) await client.init();
 
     const results = [];
     let aborted = false;
@@ -211,70 +308,95 @@ async function main() {
         aborted = true;
         break;
       }
-      const k = overrideK ?? q.k ?? 2;
-      let toolResult;
-      try {
-        toolResult = await client.call("tools/call", {
-          name: "chain_find_relevant_policies",
-          arguments: { question: q.q, k },
-        });
-      } catch (err) {
-        results.push({ q: q.q, retrieval_pass: false, error: err.message });
-        continue;
-      }
 
-      const text = toolResult?.content?.[0]?.text ?? "";
-      let parsed;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        parsed = { results: [] };
-      }
-      const returned = parsed.results ?? [];
-      const returnedNumbers = returned.map((r) => r.number);
-
-      let retrievalPass = null;
-      if (q.expected_op_numbers && q.expected_op_numbers.length > 0) {
-        retrievalPass = q.expected_op_numbers.some((op) => returnedNumbers.includes(op));
-      }
-
+      let returned = [];
+      let returnedNumbers = [];
       let judgeAnswer = null;
       let assessment = null;
       let answerPass = null;
       let refusalPass = null;
       let usage = null;
 
-      if (useJudge) {
+      if (openaiClient) {
+        // ---- OpenAI answering branch ----
+        let oaiResult;
         try {
-          const r = await callAnthropic(q.q, returned);
-          judgeAnswer = r.text;
-          usage = r.usage;
-          assessment = parseAssessment(r.text);
-
-          if (assessment) {
-            const cited = assessment.cited_op_numbers ?? [];
-            const refused = !!assessment.refused;
-            // Cross-references inside a retrieved policy's body (e.g. OP 12.37
-            // saying "see OP 03.03") are legitimate verbatim citations, not
-            // fabrications. Allow any OP that appears in the retrieved IDs OR
-            // anywhere in the retrieved bodies.
-            const groundedOps = new Set(returnedNumbers);
-            for (const p of returned) {
-              for (const op of fabricatedOp(p.text || "")) groundedOps.add(op);
-            }
-            const fab = fabricatedOp(r.text).filter((op) => !groundedOps.has(op));
-
-            if (q.negative === true) {
-              refusalPass = refused && fab.length === 0;
-            } else if (q.expected_op_numbers && q.expected_op_numbers.length > 0) {
-              answerPass =
-                !refused &&
-                q.expected_op_numbers.some((op) => cited.includes(op)) &&
-                fab.length === 0;
-            }
-          }
+          oaiResult = await callOpenAIWithMcp(q.q);
         } catch (err) {
-          console.error(`run-eval: judge call failed for "${q.q.slice(0, 50)}…": ${err.message}`);
+          results.push({ q: q.q, retrieval_pass: false, error: err.message });
+          continue;
+        }
+        returned = oaiResult.returned;
+        returnedNumbers = returned.map((r) => r.number);
+        judgeAnswer = oaiResult.answerText;
+        usage = oaiResult.usage;
+
+        if (useJudge) {
+          try {
+            const assessmentText = await judgeOpenAIAnswer(q.q, returned, oaiResult.answerText);
+            const m = assessmentText.match(/\{[\s\S]*\}/);
+            if (m) assessment = JSON.parse(m[0]);
+          } catch (err) {
+            console.error(`run-eval: judge call failed for "${q.q.slice(0, 50)}…": ${err.message}`);
+          }
+        }
+      } else {
+        // ---- Anthropic answering branch (unchanged behavior) ----
+        const k = overrideK ?? q.k ?? 2;
+        let toolResult;
+        try {
+          toolResult = await client.call("tools/call", {
+            name: "chain_find_relevant_policies",
+            arguments: { question: q.q, k },
+          });
+        } catch (err) {
+          results.push({ q: q.q, retrieval_pass: false, error: err.message });
+          continue;
+        }
+
+        const text = toolResult?.content?.[0]?.text ?? "";
+        let parsed;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          parsed = { results: [] };
+        }
+        returned = parsed.results ?? [];
+        returnedNumbers = returned.map((r) => r.number);
+
+        if (useJudge) {
+          try {
+            const r = await callAnthropic(q.q, returned);
+            judgeAnswer = r.text;
+            usage = r.usage;
+            assessment = parseAssessment(r.text);
+          } catch (err) {
+            console.error(`run-eval: judge call failed for "${q.q.slice(0, 50)}…": ${err.message}`);
+          }
+        }
+      }
+
+      let retrievalPass = null;
+      if (q.expected_op_numbers && q.expected_op_numbers.length > 0) {
+        retrievalPass = q.expected_op_numbers.some((op) => returnedNumbers.includes(op));
+      }
+
+      if (assessment) {
+        const cited = assessment.cited_op_numbers ?? [];
+        const refused = !!assessment.refused;
+        const groundedOps = new Set(returnedNumbers);
+        for (const p of returned) {
+          for (const op of fabricatedOp(p.text || "")) groundedOps.add(op);
+        }
+        const fab = fabricatedOp(judgeAnswer || "").filter((op) => !groundedOps.has(op));
+
+        if (q.negative === true) {
+          refusalPass = refused && fab.length === 0;
+        } else if (q.expected_op_numbers && q.expected_op_numbers.length > 0) {
+          answerPass =
+            !refused &&
+            q.expected_op_numbers.some((op) => cited.includes(op)) &&
+            fab.length === 0;
         }
       }
 
@@ -328,13 +450,13 @@ async function main() {
     mkdirSync(evalDir, { recursive: true });
     const date = new Date().toISOString().slice(0, 10);
     const kSuffix = overrideK !== null ? `-k${overrideK}` : "";
-    const modelSuffix = useJudge ? `-${modelKey}` : "";
-    const outPath = resolve(evalDir, `eval-${date}${kSuffix}${modelSuffix}.json`);
+    const answererSuffix = openaiModel ? `-${openaiModel}` : (useJudge ? `-${modelKey}` : "");
+    const outPath = resolve(evalDir, `eval-${date}${kSuffix}${answererSuffix}.json`);
     writeFileSync(outPath, JSON.stringify({ summary, results }, null, 2) + "\n");
     console.error(`run-eval: wrote ${outPath}`);
     console.error(JSON.stringify(summary, null, 2));
   } finally {
-    client.close();
+    if (client) client.close();
   }
 }
 
