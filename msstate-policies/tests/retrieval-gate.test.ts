@@ -56,31 +56,38 @@ test("gateRetrieval rejects empty/low-score sets and respects margin", () => {
   assert.equal(noMargin.accept.length, 2);
 });
 
-test("gateRetrieval rejects on raw BM25 score floor (continuous, per-question signal)", () => {
-  // Top-1 raw BM25 below the 11.5 default floor -> reject as "insufficient
-  // confidence". This is the lever calibrated empirically — see
-  // scripts/calibrate-thresholds.mts.
+test("gateRetrieval rejects on raw BM25 score floor when caller opts in", () => {
+  // The BM25 floor is opt-in (DEFAULT_MIN_BM25_SCORE = 0 = disabled) after
+  // 2026-05-08 validation showed an active default floor regressed the eval
+  // by cutting off cross-reference grounding. Tests pass an explicit
+  // minBm25Score so the gate branch is exercised regardless of default.
+  const optsWithFloor = (minBm25Score: number) => ({
+    minScore: 0,
+    minBm25Score,
+    minMargin: 0,
+  });
+
+  // Top-1 raw BM25 below the threshold -> reject as "insufficient confidence".
   const lowBm25 = gateRetrieval(
     [hit("0104", 0.025, 8.0), hit("0309", 0.020, 6.5)],
-    // minScore disabled so we're isolating the BM25 check.
-    { minScore: 0, minMargin: 0 },
+    optsWithFloor(11.5),
   );
   assert.equal(lowBm25.rejected, true);
   assert.equal(lowBm25.accept.length, 0);
   assert.match(lowBm25.reason ?? "", /BM25/);
 
-  // Top-1 raw BM25 comfortably above the floor -> accept.
+  // Top-1 raw BM25 comfortably above the threshold -> accept.
   const highBm25 = gateRetrieval(
     [hit("0104", 0.025, 25.0), hit("0309", 0.020, 18.0)],
-    { minScore: 0, minMargin: 0 },
+    optsWithFloor(11.5),
   );
   assert.equal(highBm25.rejected, false);
   assert.equal(highBm25.accept.length, 2);
 
-  // Top-1 raw BM25 right at the floor -> accept (>=).
+  // Top-1 raw BM25 right at the threshold -> accept (>=).
   const atFloor = gateRetrieval(
     [hit("0104", 0.025, 11.5)],
-    { minScore: 0, minMargin: 0 },
+    optsWithFloor(11.5),
   );
   assert.equal(atFloor.rejected, false);
   assert.equal(atFloor.accept.length, 1);
@@ -89,16 +96,16 @@ test("gateRetrieval rejects on raw BM25 score floor (continuous, per-question si
   // skipped, falls through to other checks.
   const noBm25Signal = gateRetrieval(
     [hit("0104", 0.025, null)],
-    { minScore: 0, minMargin: 0 },
+    optsWithFloor(11.5),
   );
   assert.equal(noBm25Signal.rejected, false);
   assert.equal(noBm25Signal.accept.length, 1);
 
-  // Custom threshold honored.
-  const customFloor = gateRetrieval(
-    [hit("0104", 0.025, 9.0)],
-    { minScore: 0, minBm25Score: 8.0, minMargin: 0 },
+  // Default (no minBm25Score override) -> floor is 0, gate doesn't reject.
+  const defaultsOff = gateRetrieval(
+    [hit("0104", 0.025, 3.0)],
+    { minScore: 0, minMargin: 0 },
   );
-  assert.equal(customFloor.rejected, false);
-  assert.equal(customFloor.accept.length, 1);
+  assert.equal(defaultsOff.rejected, false);
+  assert.equal(defaultsOff.accept.length, 1);
 });

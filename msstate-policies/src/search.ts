@@ -451,22 +451,26 @@ export interface GateResult {
 
 // Default thresholds.
 //
-// minBm25Score = 11.5 — empirically calibrated against the 50-question eval
-// (BM25-only mode, run 2026-05-08). The observed top-1 BM25 distribution:
-//   positive PASSING  (n=33): min 11.93,  median 25.23,  max 94.55
-//   positive FAILING  (n=5):  min  5.35,  median  7.84,  max 11.20
-//   negative no-OP    (n=12): min  4.63,  median 10.03,  max 22.09
-// 11.5 sits cleanly between the highest failing-positive (11.20) and the
-// lowest passing-positive (11.93) — preserves all 33 currently-passing cases
-// while rejecting all 5 currently-failing positives and ~half of the
-// negative cases at the MCP layer instead of relying on the LLM to refuse.
-// Re-run scripts/calibrate-thresholds.mts after corpus changes to recheck.
+// minBm25Score = 0 — DISABLED BY DEFAULT after empirical validation showed
+// the originally-calibrated 11.5 floor regressed the eval. The static
+// distribution analysis (scripts/calibrate-thresholds.mts) found a clean gap
+// between failing-positives (top-1 BM25 max 11.20) and lowest-passing (11.93),
+// suggesting 11.5 was a safe floor. In practice it dropped composite from
+// 86/88 to 78/88: the eval grades retrieval as a pass when the expected OP
+// appears either in top-k OR via cross-references from top-k policies (see
+// commit 24e23e5). Hard-rejecting at 11.5 cuts off the cross-ref recovery
+// path for ~4 weak-keyword questions that would otherwise have been salvaged.
+//
+// The plumbing (FusedHit.bm25Score, GateThresholds.minBm25Score, this gate
+// branch) is preserved so callers can opt in per call when they want strict
+// MCP-layer refusal — for example, hybrid mode where embedding similarity
+// also varies and a multi-signal floor is more defensible. Default-off keeps
+// us honest with the eval baseline.
 //
 // minScore = 0.01 — legacy fused-score floor. Kept for backward compatibility.
-// In single-signal mode this is effectively a no-op (every top-1 sits at
-// 0.0164). The real gate is minBm25Score above.
+// Effectively a no-op in single-signal mode (every top-1 sits at 0.0164).
 const DEFAULT_MIN_SCORE = 0.01;
-const DEFAULT_MIN_BM25_SCORE = 11.5;
+const DEFAULT_MIN_BM25_SCORE = 0;
 const DEFAULT_MIN_MARGIN = 0;
 
 export function gateRetrieval(
