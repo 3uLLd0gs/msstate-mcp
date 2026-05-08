@@ -42,3 +42,32 @@ jobs:
           COUNT=$(printf '%s\n' "$PAYLOAD" | node dist/index.js | head -n1 | jq -r '.result.tools | length')
           echo "tool count = $COUNT"
           test "$COUNT" = "5"
+
+      # N6: gate every push/PR on the mechanical security checklist + npm audit
+      # so regressions surface in CI rather than at the next manual release.
+      - name: msstate-policies npm audit (high+critical)
+        run: npm audit --audit-level=high
+
+      - name: worker npm audit (high+critical)
+        working-directory: ../worker
+        run: |
+          if [ -f package-lock.json ]; then
+            npm audit --audit-level=high
+          else
+            echo "skipping worker audit: no package-lock.json"
+          fi
+
+      - name: security-checklist gate (must score >= 100)
+        working-directory: ..
+        run: |
+          score=$(bash tools/security-checklist.sh 2>/tmp/checklist.log | tail -1)
+          cat /tmp/checklist.log
+          echo "score=$score"
+          if ! [[ "$score" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: checklist did not output a numeric score"
+            exit 1
+          fi
+          if [ "$score" -lt 100 ]; then
+            echo "ERROR: security checklist regressed below 100 (now $score)"
+            exit 1
+          fi
