@@ -104,9 +104,33 @@ The latest GitHub release ships a starter zip (`msstate-policies-starter.zip`) w
 
 This works on the **Claude mobile app** too — once the Project is set up on web, your phone sees the same Project and you can ask questions from mobile. The starter zip is a smaller corpus than the live MCP (22 policies vs. 218), but it's the only path that works without installing anything.
 
-### Why claude.ai web and mobile can't use the live MCP directly
+### claude.ai web + Claude mobile (paid users) — via the hosted Worker
 
-Anthropic's claude.ai (web and mobile) supports MCP servers through the **Connectors** feature, which only accepts **remote HTTP/SSE servers**. This project is a **local stdio** server — it runs on your machine. For full corpus access on web/mobile, you'd need a remote variant deployed somewhere (Cloudflare Workers, fly.io, etc.); that's on the roadmap but not in this release. Workaround: use the Project starter zip above, or install Claude Desktop on a computer for full MCP support.
+claude.ai's connector feature only speaks remote HTTP/SSE, so the local stdio server above can't be used directly. We ship a **hosted Cloudflare Worker variant** for this purpose:
+
+**Connector URL:**
+
+```
+https://msstate-policies-mcp.mminsub90.workers.dev/mcp
+```
+
+**To add it on claude.ai (paid):**
+
+1. Sign in to <https://claude.ai>.
+2. Open **Settings → Connectors** (or the connector button near the chat composer).
+3. Click **Add custom connector**.
+4. **Name:** `MSU Policies` (or anything)
+5. **URL:** `https://msstate-policies-mcp.mminsub90.workers.dev/mcp`
+6. Save. The connector should appear with 5 tools.
+7. In a new chat, enable the connector and ask a policy question.
+
+The same connector then works in the **Claude mobile app** (iOS / Android) under the same account.
+
+**Caveat — corpus is a snapshot, not live:** The Worker reads from a pre-built corpus (built periodically and shipped with each deploy), not the live MSU site. Most policies don't change month to month, but the answer's `retrievedAt` will be the *build* timestamp, not the moment of the request. For always-fresh data, use Path A or B above (live scrape per request). This is documented in the response payload via `corpus_built_at` on `health_check`.
+
+### Why this needed a separate variant
+
+Anthropic's claude.ai (web and mobile) supports MCP servers only through the **Connectors** feature, which requires a public HTTPS URL speaking JSON-RPC over Streamable HTTP / SSE. Our local stdio server can't be used there. The Worker variant in [`worker/`](worker/) ships a static corpus snapshot (no runtime PDF parsing — Cloudflare Workers don't have `node:fs` or enough memory for `pdf-parse` at request time) and serves the same 5 tools over HTTP. Free tier hosting; rebuilt periodically via `node scripts/build-worker-corpus.mjs && cd worker && wrangler deploy`.
 
 ## What you get back
 

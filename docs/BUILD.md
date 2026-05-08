@@ -31,9 +31,16 @@ msstate-mcp/                              # repo root = Claude Code marketplace
 │   ├── audit-pdfs.mjs                    # one-time pdf-parse yield audit
 │   ├── build-embeddings.mjs              # build dist/embeddings.json
 │   ├── build-project-bundle.mjs          # Claude Project starter zip
+│   ├── build-worker-corpus.mjs           # build worker/corpus.json (Worker variant)
 │   ├── calibrate-thresholds.mts          # F2 fused/raw-BM25 score sweep
 │   ├── run-eval.mjs                      # MCP-driven eval harness
 │   └── sync-version.mjs                  # syncs package.json -> plugin.json
+├── worker/                               # Cloudflare Worker variant (HTTP/JSON-RPC)
+│   ├── src/index.ts                      # MCP-over-HTTP, all 5 tools, BM25 only
+│   ├── corpus.json                       # pre-extracted policy text snapshot
+│   ├── wrangler.toml                     # Cloudflare deploy config
+│   ├── package.json                      # devDeps: wrangler, workers-types
+│   └── tsconfig.json                     # ES2022/WebWorker target
 └── msstate-policies/                     # the plugin == the npm package
     ├── .claude-plugin/plugin.json        # plugin manifest (mcpServers entry)
     ├── package.json                      # publishable to npm
@@ -111,6 +118,54 @@ Volume IDs (`name="volume"`) and section IDs (`name="section"`) are Drupal taxon
 WAF detection: site is normally fronted by F5 (its `id="f5_cspm"` script is *always* present in normal responses). Use it as a challenge signal **only** when combined with an absent `#datatable`. Cloudflare-style patterns probably never fire here.
 
 PDF text extraction: `pdf-parse` inner-module import → NFKC normalize → strip excessive whitespace. If extracted text < `MIN_USABLE_POLICY_TEXT_CHARS = 200`, fall back to landing page; if both fail, throw — do not cache empty success.
+
+## Cloudflare Worker variant — claude.ai web + mobile
+
+`worker/` ships a remote HTTP/JSON-RPC variant of the same 5 tools so that Anthropic's claude.ai web connector and Claude mobile can use this server (the local stdio path doesn't work there — connectors are HTTP/SSE only).
+
+**Live URL:** <https://msstate-policies-mcp.mminsub90.workers.dev/mcp>
+
+### Deployment cycle
+
+```bash
+# 1. Refresh the corpus snapshot (live MSU scrape, ~3-5 min)
+node scripts/build-worker-corpus.mjs
+
+# 2. Deploy
+cd worker
+export CLOUDFLARE_API_TOKEN=<token from dash.cloudflare.com/profile/api-tokens>
+npx wrangler deploy
+```
+
+`wrangler login` (the OAuth flow) doesn't work cleanly in Codespaces because it uses `localhost` for the OAuth callback. Use an API token instead.
+
+### Architectural difference vs. stdio
+
+| Aspect | stdio (Path A/B) | Worker (Path C) |
+|---|---|---|
+| Where it runs | User's machine | Cloudflare edge |
+| Corpus freshness | Live scrape per request | Snapshot, refreshed at build time |
+| Retrieval | BM25 + optional embeddings/hybrid | BM25 only (embeddings would blow the bundle limit) |
+| `retrievedAt` | Now | Build timestamp from `corpus.json` |
+| PDF parsing | At request time | At build time only (Workers have no `node:fs`) |
+| Cost | $0 (runs locally) | $0 on Cloudflare free tier (100k req/day) |
+
+The corpus rule still holds: text comes only from `policies.msstate.edu`. Just sampled at build time, not request time.
+
+### Worker code summary
+
+- `worker/src/index.ts` — hand-rolled JSON-RPC 2.0 handler (the MCP TypeScript SDK uses Node `http` which doesn't exist in Workers). Implements `initialize`, `notifications/initialized`, `notifications/cancelled`, `tools/list`, `tools/call`, `ping`. Protocol version `2025-06-18`.
+- BM25 logic mirrors `msstate-policies/src/search.ts`: same TOKEN_SPLIT, same FIELD_WEIGHTS (title×3, number×2, body×1), same K1=1.2, B=0.75. Tokenization happens once at module load (within Cloudflare's "Initialization Period" — not subject to per-request CPU limits).
+- Tool descriptions copied verbatim from the stdio version so client-side LLM behavior matches.
+- CORS open (`Access-Control-Allow-Origin: *`) so the connector can reach it from any origin.
+- 5 routes: `GET /` / `GET /info` (server info JSON), `GET /health` (uptime probe), `POST /mcp` (the MCP endpoint), `OPTIONS *` (CORS preflight), `* *` (404).
+
+### What the Worker doesn't have (deliberate)
+
+- No embeddings — `dist/embeddings.json` is 24 MB; Worker bundle limit is 10 MB compressed (free) / 25 MB (paid). BM25-only is the better trade-off here. The comparative eval already showed BM25 ties embed at 86/88, so this isn't a real loss.
+- No live scrape — pre-built snapshot only. Rebuild + redeploy weekly to keep fresh.
+- No disk cache — Workers have no filesystem. In-memory only (per-isolate).
+- No `health_check.last_index_error` — there's no scrape at request time. `health_check` reports `corpus_built_at` instead.
 
 ## Decision log (chronological)
 
