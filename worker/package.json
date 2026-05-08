@@ -1,0 +1,17 @@
+{
+  "name": "msstate-policies-mcp-worker",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Cloudflare Worker variant of msstate-policies MCP server (HTTP/JSON-RPC, claude.ai connector compatible)",
+  "scripts": {
+    "build-corpus": "node ../scripts/build-worker-corpus.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^3.90.0"
+  }
+}

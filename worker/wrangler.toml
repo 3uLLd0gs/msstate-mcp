@@ -1,0 +1,22 @@
+# Cloudflare Worker config for msstate-policies-mcp.
+#
+# Deploy:
+#   cd worker
+#   npx wrangler login          # interactive, one-time per machine
+#   npx wrangler deploy
+#
+# After deploy, the connector URL is:
+#   https://msstate-policies-mcp.<your-subdomain>.workers.dev/mcp
+#
+# Refresh the corpus periodically:
+#   node ../scripts/build-worker-corpus.mjs   # from repo root, writes worker/corpus.json
+#   cd worker && npx wrangler deploy
+
+name = "msstate-policies-mcp"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+workers_dev = true
+minify = true
+
+[observability]
+enabled = true
