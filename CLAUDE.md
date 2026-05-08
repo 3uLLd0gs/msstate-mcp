@@ -39,3 +39,15 @@ The whole grounding story of this MCP collapses if its inputs are contaminated b
 - `pdf-parse` is **pinned** (no caret) — internal layout drifts between minor versions and we use the inner-module import (`pdf-parse/lib/pdf-parse.js`).
 - All runtime logging goes to **stderr only**. `stdout` is reserved for MCP JSON-RPC framing. One stray `console.log` corrupts the protocol. Use `src/log.ts`.
 - Drupal taxonomy IDs are **never** hardcoded — parse them at runtime from the dropdown options.
+
+## Security notes (round-2 closure 2026-05-08)
+
+The mechanical security checklist (`tools/security-checklist.sh`) was extended from 100 → 192 pts during the round-2 audit. CI now hard-gates pushes/PRs on `score >= 100`. Current head should score **192/192**; if you regress it, fix the failing check before merging — the audit + per-finding rationale is in [`autoresearch_security.md`](./autoresearch_security.md), and the round-2 closure note in [`docs/BUILD.md`](./docs/BUILD.md) covers what changed and why.
+
+A few patterns to keep in mind so the round-2 score doesn't drift:
+- Worker error paths: never echo `(err as Error).message` to clients; always log structured fields server-side, return generic messages with the JSON-RPC `id` for correlation.
+- Worker request bodies: keep the `Content-Length > 64_000 → 413` cap before `request.json()`. Tool-arg length cap (`MAX_QUERY_CHARS = 4096`) lives downstream.
+- Worker CORS: do NOT add `Authorization` back to `Access-Control-Allow-Headers` unless real auth lands. The check is grep-based and will fail loudly if you do.
+- Build chain: `scripts/build-worker-corpus.mjs` aborts on a WAF challenge. If a future M6 cron lands, do not weaken that — it's the only thing standing between a transient MSU interstitial and a poisoned corpus.
+- Disk cache: `mkdirSync({ mode: 0o700 })` + `writeFileSync({ mode: 0o600 })` are load-bearing on multi-user hosts.
+- `SECURITY.md` `## Out of scope: client-side circumvention` captures the user-side abuse classes we explicitly disclaim. Treat that section as authoritative when triaging issue reports — anything matching those bullets is `wontfix` by design.

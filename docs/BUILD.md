@@ -381,7 +381,7 @@ The deployment surface is shaped by three realities, and the threat model follow
 
 | Surface | Threat | Mitigation |
 |---|---|---|
-| **Public Cloudflare Worker** at `https://msstate-policies-mcp.mminsub90.workers.dev` (no auth, open CORS) | DoS to exhaust Cloudflare free tier; resource-consumption via oversized payloads; abuse as a free policy-lookup proxy | CF DDoS protection; input length cap (`MAX_QUERY_CHARS=4096`) on `query`/`question` in tool handlers; generic error messages so internal state doesn't leak via `err.message` |
+| **Public Cloudflare Worker** at `https://msstate-policies-mcp.mminsub90.workers.dev` (no auth, open CORS) | DoS to exhaust Cloudflare free tier; resource-consumption via oversized payloads; abuse as a free policy-lookup proxy | CF DDoS protection; `Content-Length` 64 KB cap rejects oversized bodies before `request.json()`; input length cap (`MAX_QUERY_CHARS=4096`) on `query`/`question` in tool handlers; generic error messages on both handler-catch AND parse-catch (no `err.message` echo); `console.error` logs structured fields only (no bare `err` object → no stack in CF logs); CORS `Allow-Headers` no longer advertises `Authorization` |
 | **Published npm package** (`msstate-policies-mcp`) | Supply-chain compromise (typosquatted or malicious version); compromised release artifacts | 2FA on npm account + granular tokens with short TTL; `prepublishOnly` builds from src; future publishes should use `npm publish --provenance` from CI (see "Provenance" below) |
 | **Stdio MCP server** (local install) | PDF prompt injection (only if MSU's site is compromised); supply-chain via `npx -y` resolving to a malicious version; `pdf-parse@1.1.1` is pinned-old | Tool description pushes verbatim quoting + refusal-on-uncertainty; corpus rule constrains all inputs to MSU domain; `pdf-parse` only runs at build time on the Worker variant |
 | **Build pipeline** (`scripts/build-*.mjs`) | Tampered output (corpus.json or embeddings.json) baked into deploy artifact | Build runs against live MSU site (TLS); commits are visible in git; CI verifies `git diff --exit-code dist/` after rebuilds |
@@ -424,6 +424,23 @@ These are known and intentionally not in scope for the current release pass. Eac
 | **M6 — Automated weekly corpus rebuild** | Stale-content drift exists but the freshness loss between manual rebuilds is small (most policies don't change month-to-month). Adding a CI cron means storing a long-lived Cloudflare API token in GitHub Secrets — meaningful trust-shift. | GitHub Actions workflow + a CF token scoped to `Edit Cloudflare Workers` only, with rotation reminders. ~½ day of work + ongoing token-hygiene discipline. |
 
 If any of these items become real (DDoS observed, policy-text drift complaint, accidental force-push), revisit the cost-benefit. They're tracked here rather than in a separate ticket so a future maintainer reading this doc sees the full backlog.
+
+### Round-2 audit closure (2026-05-08)
+
+A second `$autoresearch security` sweep widened the lens beyond the round-1 checklist and surfaced ten net-new findings (N1–N10) plus an out-of-scope disclaimer (DISC). All eleven landed in a bounded fix loop the same day. The full audit + per-finding resolution table lives in [`autoresearch_security.md`](../autoresearch_security.md); the per-iteration log is `security/260508-1755-fix-loop/results.tsv`.
+
+Key downstream changes maintainers should know about:
+
+- **`tools/security-checklist.sh` extended from 100 → 192 pts.** Added one mechanical check per finding (N1–N10 + DISC). Current score is **192/192**. The CI workflow (see N6 below) gates on `>= 100` so round-1 floor is permanently enforced and round-2 progress is permanently visible.
+- **CI now hard-gates on security.** `.github/workflows/ci.yml` runs `npm audit --audit-level=high` (both packages) and `bash tools/security-checklist.sh` on every push and PR. A regression below 100 fails the build.
+- **Worker hardening landed (N1, N4, N5, N10):** generic message on the parse-error path, `Content-Length > 64 KB → 413` cap, scrubbed `console.error` payload, `Authorization` removed from CORS `Allow-Headers`. The threat-model table above reflects the updated mitigations.
+- **Build chain hardening landed (N3, N7):** `esbuild` bumped to `^0.28.0` (closes the moderate `npm audit` advisory; `dist/index.js` rebuilt); `scripts/build-worker-corpus.mjs` now ships its own `looksLikeWafChallenge` check and aborts the build on a hit. The latter is a prerequisite for any future M6 (auto-rebuild) cron, so do NOT regress it when M6 lands.
+- **Local-server hardening landed (N8, N9):** `new Function` removed from `msstate-policies/src/index.ts`; disk cache writes now use `mkdirSync({ mode: 0o700 })` + `writeFileSync({ mode: 0o600 })` so the cache isn't world-readable on multi-user hosts.
+- **`SECURITY.md` gained an `## Out of scope: client-side circumvention` section** that disclaims responsibility for the user-side abuse classes that aren't part of this server's threat model (local edits to the bundle, prompt-level instruction of the LLM, fork-the-corpus, LLM hallucination, indirect prompt injection inside published MSU PDFs). Treat that section as authoritative for "what we're NOT promising to defend."
+
+The G4 cross-gate in `tools/corpus-rule-checklist.sh` was widened from literal `= "100"` to numeric `>= 100` so round-2 progress doesn't trip the round-2 corpus-rule loop's anti-regression check. If you ever add another scoring axis to either checklist, mirror that pattern.
+
+The two M-tier deferred items relevant to security (M1 rate limiting, M2 branch protection, M6 auto-rebuild) are unchanged — see the table above. The only outstanding manual actions sit out-of-band: rotate the npm publish token used for `0.2.0`, and revoke the Cloudflare API token used to deploy the Worker.
 
 ## Conventions
 
