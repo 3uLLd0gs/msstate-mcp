@@ -242,6 +242,11 @@ export interface FusedHit {
   score: number;
   bm25Rank: number | null;
   embedRank: number | null;
+  // Raw BM25 score of this doc (continuous, not rank-derived). Null when the
+  // doc only came in via embeddings. Carried so gateRetrieval can use a
+  // continuous signal — fused score is always 1/(60+rank), which is degenerate
+  // in BM25-only mode. See calibrate-thresholds.mts.
+  bm25Score: number | null;
   snippet: string;
 }
 
@@ -255,7 +260,11 @@ export async function hybridSearch(
   const embedHits = await embedSearch(query, 20);
 
   const byBm25Rank = new Map<string, number>();
-  bm25Hits.forEach((h, i) => byBm25Rank.set(h.slug, i + 1));
+  const byBm25Score = new Map<string, number>();
+  bm25Hits.forEach((h, i) => {
+    byBm25Rank.set(h.slug, i + 1);
+    byBm25Score.set(h.slug, h.score);
+  });
   const byEmbedRank = new Map<string, number>();
   const snippetByEmbed = new Map<string, string>();
   embedHits.forEach((h, i) => {
@@ -280,6 +289,7 @@ export async function hybridSearch(
       score,
       bm25Rank: bm,
       embedRank: em,
+      bm25Score: byBm25Score.get(slug) ?? null,
       snippet: snippetByEmbed.get(slug) ?? "",
     });
   }
@@ -422,7 +432,14 @@ export function attachBodiesFromEmbeddings(): { attached: number; chunks: number
 // policy found" itself rather than pushing all refusal logic to the LLM.
 
 export interface GateThresholds {
+  // Legacy fused-score floor (rank-based RRF). Kept for backward compatibility,
+  // but degenerate in BM25-only mode where every top-1 has the same fused score
+  // 1/(60+1) ≈ 0.0164. Use minBm25Score for the actual confidence signal.
   minScore?: number;
+  // Raw BM25 top-1 score floor (continuous, per-question). The empirically
+  // calibrated lever — see scripts/calibrate-thresholds.mts. Skipped when the
+  // top hit's bm25Score is null (e.g. came in only via embeddings).
+  minBm25Score?: number;
   minMargin?: number;
 }
 
@@ -432,29 +449,24 @@ export interface GateResult {
   reason?: string;
 }
 
-// Default thresholds — derived from RRF math, NOT empirical eval calibration.
-// Real calibration (per-question score distributions) requires recording the
-// fused scores during an eval run; that is out of scope until the deferred
-// eval is rerun. See plan-codex-fixes.md "Phase 2 follow-up".
+// Default thresholds.
 //
-// RRF math (RRF_K = 60, two signals: BM25 + embeddings):
-//   max possible score      = 1/(60+1) + 1/(60+1)  ≈ 0.0328  (top-1 in BOTH signals)
-//   single-signal rank-1    = 1/(60+1)             ≈ 0.0164  (top-1 in ONE signal)
-//   single-signal rank-3    = 1/(60+3)             ≈ 0.0159
-//   single-signal rank-10   = 1/(60+10)            ≈ 0.0143
-//   single-signal rank-40   = 1/(60+40)            =  0.0100
-//   single-signal rank-200  = 1/(60+200)           ≈ 0.0038  (essentially noise)
+// minBm25Score = 11.5 — empirically calibrated against the 50-question eval
+// (BM25-only mode, run 2026-05-08). The observed top-1 BM25 distribution:
+//   positive PASSING  (n=33): min 11.93,  median 25.23,  max 94.55
+//   positive FAILING  (n=5):  min  5.35,  median  7.84,  max 11.20
+//   negative no-OP    (n=12): min  4.63,  median 10.03,  max 22.09
+// 11.5 sits cleanly between the highest failing-positive (11.20) and the
+// lowest passing-positive (11.93) — preserves all 33 currently-passing cases
+// while rejecting all 5 currently-failing positives and ~half of the
+// negative cases at the MCP layer instead of relying on the LLM to refuse.
+// Re-run scripts/calibrate-thresholds.mts after corpus changes to recheck.
 //
-// 0.01 admits any single-signal hit at top-40 or better (very permissive while
-// filtering deep-tail noise). Anything below 0.01 means neither BM25 nor the
-// embedding model could place the doc in its top-40 — almost certainly a
-// false positive against a 218-policy corpus. Once empirical data is in,
-// retighten toward the 0.0143-0.0164 band.
-//
-// minMargin stays 0 (disabled). RRF margins are tiny and ranking ties are
-// common; setting a margin floor without eval data risks rejecting confident
-// answers. Revisit with calibration data.
+// minScore = 0.01 — legacy fused-score floor. Kept for backward compatibility.
+// In single-signal mode this is effectively a no-op (every top-1 sits at
+// 0.0164). The real gate is minBm25Score above.
 const DEFAULT_MIN_SCORE = 0.01;
+const DEFAULT_MIN_BM25_SCORE = 11.5;
 const DEFAULT_MIN_MARGIN = 0;
 
 export function gateRetrieval(
@@ -462,6 +474,7 @@ export function gateRetrieval(
   thresholds: GateThresholds = {},
 ): GateResult {
   const minScore = thresholds.minScore ?? DEFAULT_MIN_SCORE;
+  const minBm25Score = thresholds.minBm25Score ?? DEFAULT_MIN_BM25_SCORE;
   const minMargin = thresholds.minMargin ?? DEFAULT_MIN_MARGIN;
 
   if (fused.length === 0) {
@@ -474,11 +487,26 @@ export function gateRetrieval(
 
   const sorted = [...fused].sort((a, b) => b.score - a.score);
   const top = sorted[0];
+
+  // Primary gate: raw BM25 top-1 score. Continuous and informative in both
+  // BM25-only and hybrid mode. Skip when the signal is missing (top hit came
+  // in only via embeddings — null) so the gate doesn't over-reject in
+  // embeddings-rich situations.
+  if (top.bm25Score !== null && top.bm25Score !== undefined && top.bm25Score < minBm25Score) {
+    return {
+      accept: [],
+      rejected: true,
+      reason: `top-1 raw BM25 score ${top.bm25Score.toFixed(2)} below floor ${minBm25Score.toFixed(2)} (insufficient confidence)`,
+    };
+  }
+
+  // Legacy gate: fused-score floor. Degenerate in single-signal mode but
+  // retained so existing callers/tests that rely on it keep working.
   if (top.score < minScore) {
     return {
       accept: [],
       rejected: true,
-      reason: `top-1 score ${top.score.toFixed(4)} below floor ${minScore.toFixed(4)} (insufficient confidence)`,
+      reason: `top-1 fused score ${top.score.toFixed(4)} below floor ${minScore.toFixed(4)} (insufficient confidence)`,
     };
   }
 

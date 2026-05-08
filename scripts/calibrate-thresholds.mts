@@ -22,7 +22,7 @@ import { resolve } from "node:path";
 const scraperMod = (await import("../msstate-policies/src/scraper.ts")) as any;
 const searchMod = (await import("../msstate-policies/src/search.ts")) as any;
 const { fetchIndex } = scraperMod.default ?? scraperMod;
-const { indexEntries, hybridSearch, attachBodiesFromEmbeddings } =
+const { indexEntries, hybridSearch, bm25Search, attachBodiesFromEmbeddings } =
   searchMod.default ?? searchMod;
 
 interface Question {
@@ -37,8 +37,10 @@ interface PerQuestion {
   expected: string[];
   top1Score: number | null;
   top1Slug: string | null;
+  top1Bm25Raw: number | null; // raw BM25 score of top-1 BM25 hit (continuous)
   expectedRank: number; // -1 if expected not in top-10 (or no expected)
   expectedScore: number | null;
+  expectedBm25Raw: number | null; // raw BM25 score of expected OP (if found)
   topScores: number[];
 }
 
@@ -71,9 +73,14 @@ const slugToNumber = new Map(idx.rows.map((r) => [r.slug, r.number]));
 const results: PerQuestion[] = [];
 for (const q of questions) {
   const hits = await hybridSearch(q.q, { topK: TOP_K });
+  const bmHits = bm25Search(q.q, TOP_K);
+  const bm25BySlug = new Map<string, number>(
+    bmHits.map((h: { slug: string; score: number }) => [h.slug, h.score]),
+  );
   const topScores = hits.map((h) => h.score);
   let expectedRank = -1;
   let expectedScore: number | null = null;
+  let expectedBm25Raw: number | null = null;
   const expected = q.expected_op_numbers ?? [];
   if (expected.length > 0) {
     for (let i = 0; i < hits.length; i++) {
@@ -81,6 +88,7 @@ for (const q of questions) {
       if (opNumber && expected.includes(opNumber)) {
         expectedRank = i;
         expectedScore = hits[i].score;
+        expectedBm25Raw = bm25BySlug.get(hits[i].slug) ?? null;
         break;
       }
     }
@@ -90,8 +98,10 @@ for (const q of questions) {
     expected,
     top1Score: hits.length > 0 ? hits[0].score : null,
     top1Slug: hits.length > 0 ? hits[0].slug : null,
+    top1Bm25Raw: bmHits.length > 0 ? bmHits[0].score : null,
     expectedRank,
     expectedScore,
+    expectedBm25Raw,
     topScores,
   });
 }
@@ -129,24 +139,36 @@ function describe(label: string, xs: number[]): void {
   );
 }
 
-console.log("\n=== Top-1 fused-score distributions ===");
+console.log("\n=== Top-1 fused-score distributions (rank-based; constant in BM25-only mode) ===");
 describe("ALL questions      ", results.map((r) => r.top1Score ?? 0));
 describe("positive PASSING   ", positivePassing.map((r) => r.top1Score ?? 0));
 describe("positive FAILING   ", positiveFailing.map((r) => r.top1Score ?? 0));
 describe("negative (no exp.) ", negative.map((r) => r.top1Score ?? 0));
 
+console.log("\n=== Top-1 raw BM25 score distributions (continuous; informative in either mode) ===");
+describe("ALL questions      ", results.map((r) => r.top1Bm25Raw ?? 0));
+describe("positive PASSING   ", positivePassing.map((r) => r.top1Bm25Raw ?? 0));
+describe("positive FAILING   ", positiveFailing.map((r) => r.top1Bm25Raw ?? 0));
+describe("negative (no exp.) ", negative.map((r) => r.top1Bm25Raw ?? 0));
+
 console.log("\n=== Expected-OP score (where expected was found) ===");
-const foundExpectedScores = positive
+const foundExpectedFusedScores = positive
   .filter((r) => r.expectedScore !== null)
   .map((r) => r.expectedScore as number);
-describe("expected-rank score", foundExpectedScores);
+describe("expected-rank fused", foundExpectedFusedScores);
+const foundExpectedBm25 = positive
+  .filter((r) => r.expectedBm25Raw !== null)
+  .map((r) => r.expectedBm25Raw as number);
+describe("expected-rank bm25 ", foundExpectedBm25);
 
-// ---- Threshold sweep -------------------------------------------------------
+// ---- Threshold sweep on FUSED score (kept for reference) -------------------
 
-console.log("\n=== Threshold sweep — what % of currently-passing cases survive each floor? ===");
-const candidates = [0.005, 0.008, 0.01, 0.012, 0.014, 0.0143, 0.0154, 0.0164, 0.018, 0.02];
+console.log(
+  "\n=== Threshold sweep on FUSED score (rank-based) — degenerate in BM25-only mode ===",
+);
+const fusedCandidates = [0.005, 0.008, 0.01, 0.012, 0.014, 0.0143, 0.0154, 0.0164, 0.018, 0.02];
 console.log("threshold  passing-survives  failing-rejected  negative-rejected");
-for (const t of candidates) {
+for (const t of fusedCandidates) {
   const passingSurvives = positivePassing.filter((r) => (r.top1Score ?? 0) >= t).length;
   const failingRejected = positiveFailing.filter((r) => (r.top1Score ?? 0) < t).length;
   const negativeRejected = negative.filter((r) => (r.top1Score ?? 0) < t).length;
@@ -155,20 +177,45 @@ for (const t of candidates) {
   );
 }
 
-// ---- Lowest passing top-1 ---------------------------------------------------
+// ---- Threshold sweep on RAW BM25 score (the actual lever) ------------------
 
-console.log("\n=== Lowest-scoring PASSING cases (would be rejected by aggressive thresholds) ===");
-const sortedPassing = [...positivePassing].sort(
-  (a, b) => (a.top1Score ?? 0) - (b.top1Score ?? 0),
+console.log(
+  "\n=== Threshold sweep on RAW BM25 score (continuous, per-question) ===",
 );
-for (const r of sortedPassing.slice(0, 5)) {
+// Build candidates from the data: span the observed range with reasonable steps.
+const allBm25 = results.map((r) => r.top1Bm25Raw ?? 0).filter((s) => s > 0);
+const bmMin = Math.min(...allBm25);
+const bmMax = Math.max(...allBm25);
+const bmCandidates: number[] = [];
+const STEPS = 12;
+for (let i = 0; i <= STEPS; i++) {
+  bmCandidates.push(bmMin + (i * (bmMax - bmMin)) / STEPS);
+}
+console.log(`(observed top-1 BM25 range: ${bmMin.toFixed(3)} .. ${bmMax.toFixed(3)})`);
+console.log("threshold  passing-survives  failing-rejected  negative-rejected");
+for (const t of bmCandidates) {
+  const passingSurvives = positivePassing.filter((r) => (r.top1Bm25Raw ?? 0) >= t).length;
+  const failingRejected = positiveFailing.filter((r) => (r.top1Bm25Raw ?? 0) < t).length;
+  const negativeRejected = negative.filter((r) => (r.top1Bm25Raw ?? 0) < t).length;
   console.log(
-    `  top1=${(r.top1Score ?? 0).toFixed(4)}  expectedRank=${r.expectedRank}  expectedScore=${(r.expectedScore ?? 0).toFixed(4)}  q="${r.q.slice(0, 80)}"`,
+    `${t.toFixed(3)}     ${passingSurvives}/${positivePassing.length} survive       ${failingRejected}/${positiveFailing.length} reject        ${negativeRejected}/${negative.length} reject`,
   );
 }
 
-console.log("\n=== Highest-scoring NEGATIVE cases (would NOT be rejected by loose thresholds) ===");
-const sortedNeg = [...negative].sort((a, b) => (b.top1Score ?? 0) - (a.top1Score ?? 0));
-for (const r of sortedNeg.slice(0, 5)) {
-  console.log(`  top1=${(r.top1Score ?? 0).toFixed(4)}  q="${r.q.slice(0, 80)}"`);
+// ---- Lowest passing top-1 (raw BM25) ---------------------------------------
+
+console.log("\n=== Lowest-scoring PASSING cases by raw BM25 (would be rejected by aggressive thresholds) ===");
+const sortedPassing = [...positivePassing].sort(
+  (a, b) => (a.top1Bm25Raw ?? 0) - (b.top1Bm25Raw ?? 0),
+);
+for (const r of sortedPassing.slice(0, 8)) {
+  console.log(
+    `  bm25=${(r.top1Bm25Raw ?? 0).toFixed(3)}  expectedRank=${r.expectedRank}  expectedBm25=${(r.expectedBm25Raw ?? 0).toFixed(3)}  q="${r.q.slice(0, 80)}"`,
+  );
+}
+
+console.log("\n=== Highest-scoring NEGATIVE cases by raw BM25 (would NOT be rejected by loose thresholds) ===");
+const sortedNeg = [...negative].sort((a, b) => (b.top1Bm25Raw ?? 0) - (a.top1Bm25Raw ?? 0));
+for (const r of sortedNeg.slice(0, 8)) {
+  console.log(`  bm25=${(r.top1Bm25Raw ?? 0).toFixed(3)}  q="${r.q.slice(0, 80)}"`);
 }
