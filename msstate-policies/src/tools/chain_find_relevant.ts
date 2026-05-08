@@ -6,8 +6,12 @@ import {
   indexEntries,
   gateRetrieval,
   attachBodiesFromEmbeddings,
+  extractMatchedPassages,
+  tokenize,
+  MatchedPassage,
 } from "../search.js";
 import { getPolicies } from "../corpus.js";
+import { PolicyDocument } from "../types.js";
 
 const ChainInput = z.object({
   question: z.string().min(1).describe("Natural-language MSU policy question."),
@@ -22,6 +26,58 @@ const ChainInput = z.object({
       "How many top policies to fetch in full. Default 2 keeps response under ~16k tokens.",
     ),
 });
+
+// ---- F4 evidence assembly (codex_review.md) ---------------------------------
+//
+// Pure mapper: PolicyDocument[] -> the MCP tool's results envelope, with a
+// per-result primaryEvidence array of short matched-passage windows. Lets the
+// model anchor its quotation in the relevant snippet rather than scanning a
+// 5-page distractor body.
+
+export interface EvidenceResultItem {
+  number: string;
+  title: string;
+  url: string;
+  pdfUrl: string;
+  effectiveDate: string | null;
+  lastRevisedDate: string | null;
+  responsibleOffice: string | null;
+  fallbackToLanding: boolean;
+  retrievedAt: string;
+  text: string;
+  primaryEvidence: MatchedPassage[];
+}
+
+export interface EvidenceResult {
+  question: string;
+  k: number;
+  results: EvidenceResultItem[];
+}
+
+export function buildEvidenceResult(
+  question: string,
+  k: number,
+  docs: PolicyDocument[],
+): EvidenceResult {
+  const queryTokens = tokenize(question);
+  return {
+    question,
+    k,
+    results: docs.map((d) => ({
+      number: d.number,
+      title: d.title,
+      url: d.landingUrl,
+      pdfUrl: d.pdfUrl,
+      effectiveDate: d.effectiveDate,
+      lastRevisedDate: d.lastRevisedDate,
+      responsibleOffice: d.responsibleOffice,
+      fallbackToLanding: d.fallbackToLanding,
+      retrievedAt: d.retrievedAt,
+      text: d.text,
+      primaryEvidence: extractMatchedPassages(d.text, queryTokens),
+    })),
+  };
+}
 
 export const chain_find_relevant_policies = {
   name: "chain_find_relevant_policies",
@@ -65,30 +121,16 @@ export const chain_find_relevant_policies = {
     }
 
     const docs = await getPolicies(gate.accept.map((h) => h.slug));
+    // F4 (codex_review.md): build the result envelope through the pure
+    // buildEvidenceResult helper so each result carries primaryEvidence —
+    // short matched-passage windows the model can anchor its quotation in,
+    // instead of scanning the entire policy body for the relevant section.
+    const payload = buildEvidenceResult(input.question, input.k, docs);
     return {
       content: [
         {
           type: "text",
-          text: JSON.stringify(
-            {
-              question: input.question,
-              k: input.k,
-              results: docs.map((d) => ({
-                number: d.number,
-                title: d.title,
-                url: d.landingUrl,
-                pdfUrl: d.pdfUrl,
-                effectiveDate: d.effectiveDate,
-                lastRevisedDate: d.lastRevisedDate,
-                responsibleOffice: d.responsibleOffice,
-                fallbackToLanding: d.fallbackToLanding,
-                retrievedAt: d.retrievedAt,
-                text: d.text,
-              })),
-            },
-            null,
-            2,
-          ),
+          text: JSON.stringify(payload, null, 2),
         },
       ],
     };
