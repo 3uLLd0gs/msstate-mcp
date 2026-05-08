@@ -432,7 +432,29 @@ export interface GateResult {
   reason?: string;
 }
 
-const DEFAULT_MIN_SCORE = 0.005;
+// Default thresholds — derived from RRF math, NOT empirical eval calibration.
+// Real calibration (per-question score distributions) requires recording the
+// fused scores during an eval run; that is out of scope until the deferred
+// eval is rerun. See plan-codex-fixes.md "Phase 2 follow-up".
+//
+// RRF math (RRF_K = 60, two signals: BM25 + embeddings):
+//   max possible score      = 1/(60+1) + 1/(60+1)  ≈ 0.0328  (top-1 in BOTH signals)
+//   single-signal rank-1    = 1/(60+1)             ≈ 0.0164  (top-1 in ONE signal)
+//   single-signal rank-3    = 1/(60+3)             ≈ 0.0159
+//   single-signal rank-10   = 1/(60+10)            ≈ 0.0143
+//   single-signal rank-40   = 1/(60+40)            =  0.0100
+//   single-signal rank-200  = 1/(60+200)           ≈ 0.0038  (essentially noise)
+//
+// 0.01 admits any single-signal hit at top-40 or better (very permissive while
+// filtering deep-tail noise). Anything below 0.01 means neither BM25 nor the
+// embedding model could place the doc in its top-40 — almost certainly a
+// false positive against a 218-policy corpus. Once empirical data is in,
+// retighten toward the 0.0143-0.0164 band.
+//
+// minMargin stays 0 (disabled). RRF margins are tiny and ranking ties are
+// common; setting a margin floor without eval data risks rejecting confident
+// answers. Revisit with calibration data.
+const DEFAULT_MIN_SCORE = 0.01;
 const DEFAULT_MIN_MARGIN = 0;
 
 export function gateRetrieval(
