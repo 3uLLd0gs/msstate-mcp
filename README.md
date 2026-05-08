@@ -1,146 +1,123 @@
 # msstate-mcp
 
-**Ask Claude about Mississippi State University Operating Policies and get answers grounded in the actual policy text — with citations.**
+**Ask Claude about Mississippi State University Operating Policies — get answers grounded in the official policy PDFs, with citations.**
 
-> ⚠️ **Unofficial.** This project is not affiliated with, endorsed by, or sponsored by Mississippi State University. It retrieves policy text from the public site at <https://www.policies.msstate.edu/current> for use by an LLM. Always verify against the official source before acting on the result.
+> ⚠️ **Unofficial.** This project is not affiliated with, endorsed by, or sponsored by Mississippi State University. It retrieves policy text from the public website at <https://www.policies.msstate.edu/current> for use by an LLM. **Always verify against the official source before acting on the result.**
 
-## What you can ask
+## What this does
 
-```
-What is MSU's hazing policy?
-What's the rule on smoking and tobacco use on campus?
-How does the grade appeal process work?
-What sanctions apply to alcohol and drug offenses for MSU students?
-What is MSU's policy on student education records (FERPA)?
-What's MSU's travel reimbursement policy?
-What's MSU's faculty grievance procedure?
-```
+Ask a natural-language question like *"What is MSU's hazing policy?"*. The MCP server fetches the official policy PDF, hands the full text to Claude, and Claude answers using **only** that text — quoting verbatim and citing the OP number, the canonical URL on `policies.msstate.edu`, and a retrieval timestamp.
 
-When you ask, Claude downloads the official MSU policy PDF, reads it, and answers using **only** that text — quoting verbatim for binding language and citing the OP number, the canonical URL on `policies.msstate.edu`, and the timestamp the policy was retrieved.
+If no MSU policy applies (*"what's the weather forecast?"*, *"the latest football score"*), Claude refuses cleanly instead of fabricating an answer.
 
-If no MSU policy applies (e.g. *"what's the weather forecast?"*), Claude refuses cleanly instead of fabricating an answer.
+You can ask things like:
 
-## Quick start (60 seconds)
+- *"What is MSU's hazing policy?"*
+- *"How does the grade appeal process work?"*
+- *"What sanctions apply to alcohol and drug offenses for MSU students?"*
+- *"What is MSU's policy on student education records (FERPA)?"*
+- *"What's the rule on smoking on campus?"*
+- *"What's MSU's travel reimbursement policy?"*
+- *"What's MSU's faculty grievance procedure?"*
 
-### Easiest — Claude Code
+## Pick your client
 
-```
+| If you use… | Easiest install | Time |
+|---|---|---|
+| **claude.ai** in a browser, or **Claude mobile** on iOS/Android | [Add a connector with a URL](#claudeai-web--claude-mobile) | 30 sec |
+| **Claude Code** (CLI) | [Two slash commands](#claude-code) | 30 sec |
+| **Claude Desktop**, **Cursor**, **Windsurf**, **Zed** | [Paste a JSON snippet](#claude-desktop-cursor-windsurf-zed) | 1 min |
+| **Free claude.ai** (no MCP support) | [Drag-and-drop a Project starter zip](#free-claudeai-no-install) | 1 min |
+
+---
+
+## claude.ai web + Claude mobile
+
+The fastest path. Works in your browser at <https://claude.ai> and the Claude iOS / Android apps. **Requires a paid claude.ai plan** to add custom connectors.
+
+1. Sign in to <https://claude.ai>.
+2. Open **Settings → Connectors** (or the connector button in the chat composer).
+3. Click **Add custom connector**.
+4. Fill in:
+   - **Name:** `MSU Policies` (anything is fine)
+   - **URL:** `https://msstate-policies-mcp.mminsub90.workers.dev/mcp`
+5. Save. The connector should now show **5 tools** available.
+6. Open a new chat, enable the connector, and ask a policy question.
+
+Once added on web, the same connector is usable from the Claude mobile app under the same account — no separate setup.
+
+> **Note on freshness:** This hosted version reads from a snapshot of MSU's policies refreshed periodically (the response includes a `corpus_built_at` timestamp). For *always-fresh* data — i.e., a live scrape of MSU per request — install one of the local paths below.
+
+## Claude Code
+
+```bash
 /plugin marketplace add mminsub11/msstate-mcp
 /plugin install msstate-policies@msstate-mcp
 ```
 
-Done. Restart Claude Code if needed and ask a policy question.
+Two commands, no JSON editing. Restart Claude Code if it doesn't pick the tools up automatically.
 
-### Claude Desktop (step-by-step)
+## Claude Desktop, Cursor, Windsurf, Zed
 
-You'll need [Node.js](https://nodejs.org) installed on your machine (any version 18 or newer). The `npx` command comes with Node.
+You'll need [Node.js 18+](https://nodejs.org) installed (the `npx` command comes with it). Then:
 
-**1. Find your config file.** It's a JSON file in a fixed location per OS:
+**1. Find your client's MCP config file:**
 
-| OS | Path |
+| Client | Path |
 |---|---|
-| macOS | `~/Library/Application Support/Claude/claude_desktop_config.json` |
-| Windows | `%APPDATA%\Claude\claude_desktop_config.json` |
-| Linux | `~/.config/Claude/claude_desktop_config.json` |
-
-If the file doesn't exist yet, create it. From Claude Desktop you can also click **Settings → Developer → Edit Config** (it'll open the right file in your default editor).
-
-**2. Add the MCP server entry.** If the file is empty, paste this whole snippet:
-
-```json
-{
-  "mcpServers": {
-    "msstate-policies": {
-      "command": "npx",
-      "args": ["-y", "msstate-policies-mcp"]
-    }
-  }
-}
-```
-
-If the file already has content (other MCP servers configured), just add `"msstate-policies"` inside the existing `"mcpServers"` object — like this:
-
-```json
-{
-  "mcpServers": {
-    "some-other-server": { "...": "..." },
-    "msstate-policies": {
-      "command": "npx",
-      "args": ["-y", "msstate-policies-mcp"]
-    }
-  }
-}
-```
-
-**3. Save the file and fully quit Claude Desktop.** Don't just close the window — on macOS use Cmd+Q; on Windows right-click the system tray icon and pick Quit. Reopen Claude Desktop.
-
-**4. Verify it loaded.** In a new chat, look for the tools indicator (usually a small icon near the chat input or in the bottom toolbar). You should see `msstate-policies` listed with 5 tools. If it's missing, see [Troubleshooting](#troubleshooting) below.
-
-**5. Try a sample question.** Ask *"What is MSU's hazing policy?"* — Claude should call the `chain_find_relevant_policies` tool and return a grounded answer with a citation.
-
-The first call takes a few seconds (the server fetches MSU's index and the relevant PDF). Later calls reuse cached data and are faster.
-
-### Cursor / Windsurf / Zed
-
-Same `npx -y msstate-policies-mcp` command, different paste location:
-
-| Client | Where to paste |
-|---|---|
+| Claude Desktop (macOS) | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| Claude Desktop (Windows) | `%APPDATA%\Claude\claude_desktop_config.json` |
+| Claude Desktop (Linux) | `~/.config/Claude/claude_desktop_config.json` |
 | Cursor | Settings → MCP → Add server |
 | Windsurf | Settings → MCP servers |
 | Zed | `~/.config/zed/settings.json` under `context_servers` |
 
-A reference snippet lives at [`examples/claude_desktop_config.json`](examples/claude_desktop_config.json).
+In Claude Desktop you can also click **Settings → Developer → Edit Config** to open the file in your editor.
 
-### Free claude.ai users — no install (works on web AND mobile)
+**2. Add this entry.** If the config is empty or missing, paste the whole snippet. If `"mcpServers"` already has other servers, just add `msstate-policies` inside it:
 
-The latest GitHub release ships a starter zip (`msstate-policies-starter.zip`) with 22 high-traffic policy PDFs and a system-prompt template that pushes Claude toward verbatim quoting.
+```json
+{
+  "mcpServers": {
+    "msstate-policies": {
+      "command": "npx",
+      "args": ["-y", "msstate-policies-mcp"]
+    }
+  }
+}
+```
 
-1. Download `msstate-policies-starter.zip` from the [latest release](https://github.com/mminsub11/msstate-mcp/releases/latest).
-2. On a computer, sign in to <https://claude.ai>.
+**3. Save and fully quit the client** — don't just close the window. On macOS use Cmd+Q; on Windows right-click the tray icon and pick Quit. Reopen.
+
+**4. Verify.** Look for the tools indicator (small icon near the chat input). You should see `msstate-policies` with **5 tools**. Then try *"What is MSU's hazing policy?"* — Claude will call the chain tool and return a grounded answer with a citation.
+
+The first call takes ~5 seconds (the server fetches MSU's index and the relevant PDF). Later calls reuse cached data and are faster.
+
+A reference snippet is at [`examples/claude_desktop_config.json`](examples/claude_desktop_config.json).
+
+## Free claude.ai (no install)
+
+If you can't install MCP servers (e.g. you're on a free claude.ai plan), there's still a path: a curated **starter zip** with 22 high-traffic policy PDFs and a system-prompt template that pushes Claude toward verbatim quoting.
+
+1. Download `msstate-policies-starter.zip` from the [latest GitHub release](https://github.com/mminsub11/msstate-mcp/releases/latest).
+2. Sign in to <https://claude.ai>.
 3. Create a new **Project** (or open an existing one).
-4. Unzip the file and drag the PDFs + the `SYSTEM_PROMPT.txt` into the Project's knowledge area.
+4. Unzip the file and drag the PDFs + `SYSTEM_PROMPT.txt` into the Project's knowledge area.
 5. Ask policy questions inside that Project's chats.
 
-This works on the **Claude mobile app** too — once the Project is set up on web, your phone sees the same Project and you can ask questions from mobile. The starter zip is a smaller corpus than the live MCP (22 policies vs. 218), but it's the only path that works without installing anything.
+Smaller corpus than the live MCP (22 of 218 policies), but works on **free** claude.ai plans and on the mobile app once the Project is set up.
 
-### claude.ai web + Claude mobile (paid users) — via the hosted Worker
+---
 
-claude.ai's connector feature only speaks remote HTTP/SSE, so the local stdio server above can't be used directly. We ship a **hosted Cloudflare Worker variant** for this purpose:
-
-**Connector URL:**
-
-```
-https://msstate-policies-mcp.mminsub90.workers.dev/mcp
-```
-
-**To add it on claude.ai (paid):**
-
-1. Sign in to <https://claude.ai>.
-2. Open **Settings → Connectors** (or the connector button near the chat composer).
-3. Click **Add custom connector**.
-4. **Name:** `MSU Policies` (or anything)
-5. **URL:** `https://msstate-policies-mcp.mminsub90.workers.dev/mcp`
-6. Save. The connector should appear with 5 tools.
-7. In a new chat, enable the connector and ask a policy question.
-
-The same connector then works in the **Claude mobile app** (iOS / Android) under the same account.
-
-**Caveat — corpus is a snapshot, not live:** The Worker reads from a pre-built corpus (built periodically and shipped with each deploy), not the live MSU site. Most policies don't change month to month, but the answer's `retrievedAt` will be the *build* timestamp, not the moment of the request. For always-fresh data, use Path A or B above (live scrape per request). This is documented in the response payload via `corpus_built_at` on `health_check`.
-
-### Why this needed a separate variant
-
-Anthropic's claude.ai (web and mobile) supports MCP servers only through the **Connectors** feature, which requires a public HTTPS URL speaking JSON-RPC over Streamable HTTP / SSE. Our local stdio server can't be used there. The Worker variant in [`worker/`](worker/) ships a static corpus snapshot (no runtime PDF parsing — Cloudflare Workers don't have `node:fs` or enough memory for `pdf-parse` at request time) and serves the same 5 tools over HTTP. Free tier hosting; rebuilt periodically via `node scripts/build-worker-corpus.mjs && cd worker && wrangler deploy`.
-
-## What you get back
+## What a response looks like
 
 Ask Claude *"What is MSU's hazing policy?"* and you'll see something like:
 
 > MSU's hazing policy, in **OP 91.208**, prohibits hazing across all university-affiliated organizations:
 >
-> *"Hazing is prohibited. Any organization, student, or other person affiliated with the university found to have engaged in hazing as defined in this policy is subject to disciplinary action under the Student Code of Conduct and other applicable university policies. Under certain circumstances, hazing may also be a violation of applicable laws, resulting in a criminal prosecution."* (OP 91.208)
+> *"Hazing is prohibited. Any organization, student, or other person affiliated with the university found to have engaged in hazing as defined in this policy is subject to disciplinary action under the Student Code of Conduct and other applicable university policies."* (OP 91.208)
 >
-> The policy defines hazing as *"any intentional, knowing, or reckless act committed by a person..."* [definition continues]
+> The policy defines hazing as *"any intentional, knowing, or reckless act committed by a person…"* [definition continues, then reporting channels]
 >
 > **Source:** OP 91.208 at <https://www.policies.msstate.edu/policy/91208> (retrieved 2026-05-08).
 
@@ -148,55 +125,48 @@ Every response includes:
 
 - The **OP number** for citation (e.g. `91.208`)
 - The **canonical URL** on `policies.msstate.edu` — click through to verify
-- An ISO **`retrievedAt`** timestamp showing when the policy text was fetched
+- An ISO **`retrievedAt`** timestamp
 - Direct quotes for binding language; no paraphrasing of normative text
+- Refusal + redirect when no MSU policy applies
 
-## Tools the MCP exposes
+## Tips for getting good answers
 
-| Tool | When you'd call it |
-|---|---|
-| `chain_find_relevant_policies` | The default for natural-language questions. Searches + fetches in one call. |
-| `search_policies` | Just keyword search; returns OP numbers + titles + match snippets. |
-| `get_policy` | Pull one specific policy in full by number (e.g. `91.100`) or URL. |
-| `cite_policy` | Format a clean citation string. |
-| `health_check` | If answers come back empty, this shows whether the scraper is broken. |
-
-You don't normally need to know these — Claude picks the right one.
+- **Ask plainly.** *"Can my RA write me up for lighting a candle in my dorm?"* works as well as *"What is the Code of Student Conduct?"*. The retrieval handles weak-keyword conceptual phrasing.
+- **Multi-part questions are fine.** Claude can cite multiple OPs in one answer (e.g., *"my professor cancelled three weeks of class — am I supposed to keep showing up?"* will surface both attendance and instructor-responsibility policies).
+- **Ask Claude to quote.** If you want to be sure the wording is verbatim from the policy, ask: *"Quote the actual policy language for the hazing definition."* The tool design encourages verbatim quoting, but a direct prompt makes it explicit.
+- **Verify the citation.** Click through the canonical URL in any answer — that's the official MSU PDF.
+- **If an answer feels off,** ask Claude to call `health_check`. If the corpus is broken or stale, that tool surfaces the failure mode honestly instead of fabricating.
 
 ## Privacy
 
 In default mode, your queries never leave your machine. The only outbound traffic is to `policies.msstate.edu` to fetch policy PDFs. No analytics, no telemetry, no third-party APIs.
 
-If you opt in to semantic retrieval (see [Configuration](#configuration-optional) below), your natural-language query is sent to OpenAI for embedding. **For sensitive topics (Title IX, harassment, FERPA), keep the default — `bm25` mode — to avoid sending the query to a third party.**
+- **Claude Code / Desktop / Cursor / Windsurf / Zed** (local install): truly local. The MCP server runs on your machine.
+- **claude.ai web / mobile via the connector**: your query goes to Anthropic (as it always does on claude.ai) and to the hosted Cloudflare Worker, which only fetches from the snapshot — never sends your query elsewhere.
+- **Sensitive topics** (Title IX, harassment, FERPA): the local install is the most private option. The connector is fine for general policy questions; for sensitive ones, the local path keeps everything on your machine.
+
+If you opt in to semantic retrieval (set `MSSTATE_POLICIES_RETRIEVAL=embed` or `=hybrid`), your natural-language query is sent to OpenAI for embedding. **The default `bm25` mode does not require this and is recommended for most users.**
 
 ## Configuration (optional)
 
-Most users don't need to set anything. If you want to tune behavior:
+Most users don't need to set anything. If you want to tune the local install:
 
 | Environment variable | Default | What it does |
 |---|---|---|
-| `MSSTATE_POLICIES_RETRIEVAL` | `bm25` | Set to `embed` or `hybrid` to use OpenAI embeddings for retrieval. The default `bm25` ties or beats embed/hybrid on the eval; opt in only for experimentation. Requires `OPENAI_API_KEY` if changed. |
+| `MSSTATE_POLICIES_RETRIEVAL` | `bm25` | Set to `embed` or `hybrid` to use OpenAI embeddings. Default ties or beats those on the eval. |
 | `OPENAI_API_KEY` | unset | Only needed if you change the retrieval mode above. |
-| `MSSTATE_POLICIES_CACHE` | unset | Set to `disk` to cache policy PDFs across process restarts (cross-platform via `env-paths`). Default is in-memory only. |
-
-## Verifying answers
-
-Don't trust the LLM. Trust the citation.
-
-1. Every response includes the canonical URL — click through to read the official PDF.
-2. The `retrievedAt` timestamp tells you when this server fetched the policy. If MSU has updated it since, the answer may be stale.
-3. If a response looks suspiciously empty, ask Claude to call `health_check`. A `last_index_error` populated there means the scraper is broken — likely MSU changed their site layout.
+| `MSSTATE_POLICIES_CACHE` | unset | Set to `disk` to cache policy PDFs across process restarts (cross-platform via `env-paths`). Default in-memory only. |
 
 ## Troubleshooting
 
-- **"All policies have empty text"** — Run `health_check`. If you see `last_index_error` and `index_row_count: 0`, MSU touched their site and the scraper needs updating. File an issue on GitHub.
-- **`tools/list` returns 0 tools** — The bundle is stale. From a local checkout: `cd msstate-policies && npm run build`. From the plugin or `npx`, reinstall to get the latest published version.
-- **Trying to use embed/hybrid retrieval and it's not working** — Check `health_check.embeddings_loaded`. If `false`, either `dist/embeddings.json` wasn't shipped (unlikely with the published package) or `OPENAI_API_KEY` is missing in your client's MCP env. Also confirm `MSSTATE_POLICIES_RETRIEVAL` is set — it defaults to `bm25`.
-- **"Hazing policy" but I'm asking about something MSU obviously doesn't cover** — Claude is supposed to refuse. If you're getting a fabricated-looking citation, file an issue with the question text — that's exactly the failure mode we eval against.
+- **"All policies have empty text" / suspiciously empty answers** — Ask Claude to call `health_check`. If `index_row_count` is 0 or `last_index_error` is populated, MSU likely changed their site layout. File an issue on GitHub.
+- **`tools/list` returns 0 tools** — In a local install, the bundle is stale. Run `cd msstate-policies && npm run build` from a checkout, or reinstall the plugin / re-run `npx`. For the connector, refresh the connector entry on claude.ai.
+- **Embed/hybrid retrieval seems off** — Confirm `MSSTATE_POLICIES_RETRIEVAL` is set to `embed` or `hybrid` (default is `bm25`) and that `OPENAI_API_KEY` is set in your client's MCP env.
+- **Connector won't connect** — Sanity check the URL is exactly `https://msstate-policies-mcp.mminsub90.workers.dev/mcp` (note the `/mcp` at the end). Hit the bare URL in your browser; you should see a JSON info page.
 
 ## Eval
 
-The current release is validated against a 50-question hand-written eval set (`msstate-policies/eval/questions.jsonl`):
+The current release is validated against a 50-question hand-written eval set:
 
 | | |
 |---|---:|
@@ -204,7 +174,7 @@ The current release is validated against a 50-question hand-written eval set (`m
 | Answer correctness (judge: prose answer matches policy text) | 37 / 38 |
 | Refusal correctness (out-of-scope questions correctly refused) | 12 / 12 |
 
-Judge: Claude Sonnet 4.6, k=5, BM25-only retrieval. The single missing case is "tornado warning during my class" — OP 01.04 (Emergency Operations) points at MSU's external Campus Emergency Management Plan, which is outside this server's corpus. Treat 86/88 as the realistic ceiling for this corpus shape.
+Judge: Claude Sonnet 4.6, k=5, BM25-only retrieval. The single missing case is *"tornado warning during my class"* — the relevant OP points at MSU's external Campus Emergency Management Plan, which is outside this server's corpus. Treat 86/88 as the realistic ceiling for the OP-only corpus.
 
 Full eval JSON: [`msstate-policies/eval/eval-2026-05-08-k5-sonnet-4-6.json`](msstate-policies/eval/eval-2026-05-08-k5-sonnet-4-6.json).
 
