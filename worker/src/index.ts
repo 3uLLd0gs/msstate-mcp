@@ -265,10 +265,23 @@ function errorContent(message: string): McpToolResponse {
   return { content: [{ type: "text", text: message }], isError: true };
 }
 
+// Cap user-provided query/question strings before tokenize() runs over them.
+// Rejecting at the boundary prevents a malicious caller from forcing the
+// Worker to allocate hundreds of MB of token arrays from a megabyte-sized
+// payload, which would push us past free-tier memory limits.
+const MAX_QUERY_CHARS = 4096;
+
+function tooLong(name: string, value: string): McpToolResponse {
+  return errorContent(
+    `${name} too long: ${value.length} chars (max ${MAX_QUERY_CHARS}). Refine the query.`,
+  );
+}
+
 async function callTool(name: string, args: Record<string, unknown>): Promise<McpToolResponse> {
   switch (name) {
     case "search_policies": {
       const query = String(args.query ?? "");
+      if (query.length > MAX_QUERY_CHARS) return tooLong("query", query);
       const limit = Math.min(Math.max(1, Number(args.limit ?? 10)), 50);
       const hits = bm25Search(query, limit);
       const results = hits.map((h) => ({
@@ -306,6 +319,7 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Mc
 
     case "chain_find_relevant_policies": {
       const question = String(args.question ?? "");
+      if (question.length > MAX_QUERY_CHARS) return tooLong("question", question);
       const k = Math.min(Math.max(1, Number(args.k ?? 2)), 5);
       const hits = bm25Search(question, k);
       if (hits.length === 0) {
