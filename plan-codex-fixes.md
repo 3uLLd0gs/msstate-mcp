@@ -11,12 +11,12 @@
 
 ---
 
-## Status (2026-05-08) — all four findings landed and validated
+## Status (2026-05-08) — all four findings landed; F2 calibration ran, finding documented below
 
 | Finding | Status | Commit(s) | Notes |
 |---|---|---|---|
 | **F1** — title-only retrieval when embeddings absent | ✅ closed | `3f6b743` | Body tokens pre-attached before search; BM25-only path now competitive. |
-| **F2** — no confidence/scope gate before returning policies | ✅ closed (calibration open) | `0edf9e4` + `dc0735f` | `gateRetrieval` shipped with `DEFAULT_MIN_SCORE=0.01`; threshold is empirically safe but uncalibrated against the score distribution. **Empirical calibration is the next iter** — see "Open follow-up" below. |
+| **F2** — no confidence/scope gate before returning policies | ⚠️ closed in code, **threshold disabled by default after empirical regression** | `0edf9e4` + `dc0735f` + `94ce7d8` + `a95db00` | See "F2 calibration finding" subsection below. Plumbing in place; default-off. |
 | **F3** — empty/poisoned cache after PDF failure | ✅ closed | `75244b9` | `MIN_USABLE_POLICY_TEXT_CHARS=200`, `isPolicyTextUsable` predicate, `fetchPolicy` throws on unusable text. No observable effect in this run (no PDF failures triggered). |
 | **F4** — whole-doc evidence inflates distractor load | ✅ closed | `cba897f` + `fd4bfde` | `extractMatchedPassages` + `buildEvidenceResult` surface `primaryEvidence: MatchedPassage[]` per result. **Headline win**: answer-pass 32 → 37. |
 
@@ -34,20 +34,25 @@ Both runs: 50 questions, k=5, Sonnet-4-6 judge, BM25-only retrieval (`OPENAI_API
 
 Codex's "no-ship" verdict is lifted on the basis of these numbers. The `ROADMAP.md` Sprint 2 accuracy gates (≥99% retrieval, 0 observed answer errors at n=50) are **not yet met** — composite 86/88 = 97.7%, with 1 retrieval miss (tornado conceptual at k=5) and 1 answer miss remaining. `v0.2.0-beta` is not yet tagged.
 
-### Open follow-up — empirical F2 threshold calibration
+### F2 calibration finding (2026-05-08)
 
-`DEFAULT_MIN_SCORE = 0.01` was chosen from RRF math, not data. The validation eval shows it is safe (37/38 retrieval held) but probably looser than necessary. Tightening it would catch more "wrong-but-confident" out-of-scope queries at the MCP layer instead of the LLM layer (the F2 architecture goal).
+**Two iterations:**
 
-The eval JSON does NOT preserve per-question fused scores (`results[].returned_numbers` lists OPs only). Two paths:
+1. **F2 v2 (`94ce7d8`):** Static analysis via `scripts/calibrate-thresholds.mts` (Path 2 above) showed a clean gap in BM25-only mode — top-1 BM25 scores for currently-passing eval cases sat at min **11.93**, while currently-failing cases topped out at **11.20**. Set `DEFAULT_MIN_BM25_SCORE = 11.5`, added `bm25Score` field on `FusedHit`, exercised by a new test.
 
-1. Add a `--record-scores` flag to `scripts/run-eval.mjs` that writes per-question `topK_scores` into `results[]`, run a free no-judge BM25-only pass, analyze.
-2. Write a separate analysis script that calls `hybridSearch(question, { topK: 10 })` for each `eval/questions.jsonl` line and records the full score array; tabulate min top-1 / max top-1 / margin distributions for passing vs failing cases; pick a threshold below the lowest-passing top-1 score.
+2. **F2 v2.1 (`a95db00`):** Empirical eval at k=5 with Sonnet judge (BM25-only, $0.66) showed the threshold regressed composite from **86/88 → 78/88** (−8: −4 retrieval, −4 answer, refusal held).
 
-Path 2 is faster (no eval-harness changes) and is the next planned task.
+**Root cause:** `scripts/run-eval.mjs` grades retrieval as a pass when the expected OP appears either in chain top-k OR via cross-references from top-k policies (see commit `24e23e5`). Hard-rejecting at top-1 BM25 < 11.5 cuts off the cross-ref recovery path for ~4 weak-keyword questions where the correct OP wasn't directly retrieved but a related policy in top-5 cross-referenced it.
+
+**Resolution:** `DEFAULT_MIN_BM25_SCORE = 0` (disabled by default). All plumbing kept — `FusedHit.bm25Score`, `GateThresholds.minBm25Score`, the gate branch, and the test (which now passes an explicit threshold to exercise the branch). Per-call opt-in remains available for callers who want strict MCP-layer refusal in contexts where cross-ref recovery doesn't matter (likely hybrid mode, where the embedding signal also varies and a multi-signal floor becomes defensible).
+
+**Regression artifact preserved:** `msstate-policies/eval/eval-2026-05-08-k5-sonnet-4-6-F2v2-regression.json` so the finding is reproducible. Canonical `eval-2026-05-08-k5-sonnet-4-6.json` was restored to the validated 86/88 baseline.
+
+**Architectural takeaway for the codex F2 finding:** in BM25-only mode with cross-ref grounding active, the eval's "retrieval" metric is *more* permissive than top-k membership, so a hard MCP-layer floor that operates only on top-1 over-rejects. To gate at the MCP layer without regression, either (a) the eval needs a "did MCP refuse correctly?" sub-metric so refusing-where-cross-ref-would-have-saved-it is scored separately from refusing-where-no-policy-applies, or (b) the gate needs a multi-signal threshold (BM25 + embeddings + cross-ref-graph awareness) that isn't worth building for a portfolio piece. **The codex F2 finding remains partially open in BM25-only mode by design.**
 
 ### Other live next steps
 
-- **Hybrid mode validation.** Validation run was BM25-only. Set `OPENAI_API_KEY`, re-run with judge to measure hybrid mode against baseline.
+- **Hybrid mode validation.** Validation run was BM25-only. Set `OPENAI_API_KEY`, re-run with judge to measure hybrid mode against baseline. The F2 BM25 gate could potentially be turned on in hybrid mode where embedding similarity adds a second informative signal.
 - **Eval gate close-out.** Composite 86/88 is short of Sprint 2 DoD. Remaining retrieval miss = tornado conceptual case. Remaining answer miss = one of the original five F4 cases that didn't fully recover.
 - **Tag `v0.2.0-beta`** once the gate closes (per ROADMAP.md Sprint 2 DoD).
 

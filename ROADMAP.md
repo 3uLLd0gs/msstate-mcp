@@ -24,12 +24,14 @@ Six `experiment:` commits (`75244b9` → `fd4bfde`) closed all four findings in 
 
 Both runs: 50 questions, k=5, BM25-only retrieval (`OPENAI_API_KEY` unset). Tests **11/11**, typecheck clean.
 
+**F2 calibration ran 2026-05-08, finding documented:** static analysis suggested `DEFAULT_MIN_BM25_SCORE = 11.5` (commit `94ce7d8`); empirical eval showed it regressed composite **86/88 → 78/88** because the eval's retrieval metric counts cross-references from top-k policies. Hard-rejecting at top-1 BM25 < 11.5 cuts off that recovery path. Rolled back to default-off in `a95db00`; plumbing kept for per-call opt-in. See [`plan-codex-fixes.md`](./plan-codex-fixes.md) "F2 calibration finding" for full detail.
+
 **Next steps (in priority order):**
 
-1. **Empirical F2 threshold calibration.** `DEFAULT_MIN_SCORE=0.01` was picked from RRF math, not data; `scripts/calibrate-thresholds.mts` already exists for this purpose — needs to be run + analyzed. Tighter threshold should catch out-of-scope queries at the MCP layer rather than the LLM layer.
-2. **Hybrid-mode validation.** Re-run eval with `OPENAI_API_KEY` set to measure hybrid retrieval against the validated BM25-only baseline.
-3. **Close Sprint 2 eval gates.** Composite 86/88 = 97.7% is short of ≥99% retrieval and 0 observed answer errors. Remaining: 1 retrieval miss (tornado conceptual at k=5), 1 answer miss.
-4. **Tag `v0.2.0-beta`** once gates close.
+1. **Hybrid-mode validation.** Re-run eval with `OPENAI_API_KEY` set to measure hybrid retrieval against the validated BM25-only baseline. The F2 BM25 gate could become viable in hybrid mode where embedding similarity adds a second informative signal.
+2. **Close Sprint 2 eval gates.** Composite 86/88 = 97.7% is short of ≥99% retrieval and 0 observed answer errors. Remaining: 1 retrieval miss (tornado conceptual at k=5), 1 answer miss.
+3. **Tag `v0.2.0-beta`** once gates close.
+4. **F2 in BM25-only mode is partially open by design** — see plan-codex-fixes.md for the architectural takeaway.
 
 ---
 
@@ -174,7 +176,7 @@ Evenings only: multiply by ~2.5×.
 Side-track that landed mid-Sprint-2 in response to the `codex_review.md` adversarial review. All four findings closed in 6 `experiment:` commits; validated by Sonnet-judge eval at k=5. See [`plan-codex-fixes.md`](./plan-codex-fixes.md) for per-finding closure detail.
 
 - [x] **F1** — body tokens pre-attached before BM25 (`3f6b743`); BM25-only path no longer degrades to title-only.
-- [x] **F2** — `gateRetrieval` confidence gate shipped with `DEFAULT_MIN_SCORE=0.01` (`0edf9e4` + `dc0735f`). Empirical calibration is the open follow-up — `scripts/calibrate-thresholds.mts` exists, needs to be run + analyzed.
+- [x] **F2** — `gateRetrieval` confidence gate shipped with `DEFAULT_MIN_SCORE=0.01` (`0edf9e4` + `dc0735f`); empirical calibration ran 2026-05-08 (`94ce7d8` set `DEFAULT_MIN_BM25_SCORE=11.5`, `a95db00` rolled back to default-off after eval regression). F2 architectural goal partially open in BM25-only mode by design — see plan-codex-fixes.md "F2 calibration finding".
 - [x] **F3** — `fetchPolicy` fails closed on unusable PDF text via `MIN_USABLE_POLICY_TEXT_CHARS=200` (`75244b9`).
 - [x] **F4** — matched-passage extractor surfaces `primaryEvidence` per result (`cba897f` + `fd4bfde`). Headline win: answer-pass 32 → 37 (+5).
 - [x] Validation eval recorded (`ba7e67e`); `npm test` 11/11; `npm run typecheck` clean.
