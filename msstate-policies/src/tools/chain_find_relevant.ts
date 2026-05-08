@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { fetchIndex } from "../scraper.js";
-import { hybridSearch, indexEntries, gateRetrieval } from "../search.js";
+import {
+  hybridSearch,
+  indexEntries,
+  gateRetrieval,
+  attachBodiesFromEmbeddings,
+} from "../search.js";
 import { getPolicies } from "../corpus.js";
 
 const ChainInput = z.object({
@@ -28,6 +33,11 @@ export const chain_find_relevant_policies = {
     const input = ChainInput.parse(rawInput);
     const idx = await fetchIndex();
     indexEntries(idx.rows);
+    // F1 (codex_review.md): seed BM25 body tokens from the shipped embeddings
+    // chunks BEFORE hybridSearch. Without this, body-only queries (e.g.
+    // "tornado warning") miss policies whose titles don't contain the term.
+    // No-op when embeddings.json is absent; fail-degraded, not silently wrong.
+    attachBodiesFromEmbeddings();
 
     const fused = await hybridSearch(input.question, { topK: input.k });
 

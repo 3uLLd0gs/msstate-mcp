@@ -384,6 +384,37 @@ export function extractMatchedPassages(
   return passages.slice(0, maxPassages);
 }
 
+// ---- Pre-attach bodies from shipped embeddings (F1 in codex_review.md) -----
+//
+// Without this, bm25Search runs against title+number tokens only at production
+// startup (bodies are loaded lazily by corpus.ts AFTER ranking, which is too
+// late to influence the rank). That means a conceptual question like
+// "tornado warning" misses OP 01.04 entirely if its title doesn't contain the
+// word. The embeddings file already ships the chunked policy text — we group
+// chunks by slug and seed BM25 body tokens with that text at startup.
+//
+// Returns counts so health_check can surface "embeddings: degraded" when the
+// file is absent (no bodies attached).
+
+export function attachBodiesFromEmbeddings(): { attached: number; chunks: number } {
+  const ef = tryLoadEmbeddings();
+  if (!ef) return { attached: 0, chunks: 0 };
+
+  const bySlug = new Map<string, string[]>();
+  for (const ch of ef.chunks) {
+    const arr = bySlug.get(ch.slug);
+    if (arr) arr.push(ch.text);
+    else bySlug.set(ch.slug, [ch.text]);
+  }
+
+  let attached = 0;
+  for (const [slug, texts] of bySlug.entries()) {
+    attachBody(slug, texts.join("\n\n"));
+    attached++;
+  }
+  return { attached, chunks: ef.chunks.length };
+}
+
 // ---- Retrieval confidence gate (F2 in codex_review.md) ---------------------
 //
 // Returns a calibrated accept/reject decision instead of letting downstream
