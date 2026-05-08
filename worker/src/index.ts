@@ -534,6 +534,11 @@ export default {
           }),
         );
       } catch (err) {
+        // Don't echo (err as Error).message to the client — could leak
+        // internal paths, stack frames, or partially-evaluated state. Log
+        // server-side via the platform's runtime logs and return a
+        // generic message with the request id for correlation.
+        console.error("MCP handler error", err);
         return withCors(
           new Response(
             JSON.stringify({
@@ -541,7 +546,7 @@ export default {
               id: body.id ?? null,
               error: {
                 code: -32603,
-                message: `Internal error: ${(err as Error).message}`,
+                message: "Internal server error. The request id is in `id`.",
               },
             }),
             { status: 500, headers: { "Content-Type": "application/json" } },
