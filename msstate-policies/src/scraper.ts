@@ -4,7 +4,7 @@
  * All site-specific selectors and regexes live at the top of this file so
  * a layout change at MSU is a one-file fix.
  *
- * Design constraints from PLAN.md:
+ * Design constraints (see docs/BUILD.md "Scraper"):
  *  - Drupal taxonomy IDs (volume / section dropdown values) are NEVER hardcoded.
  *    They renumber on re-imports. We parse the dropdowns at runtime instead.
  *  - PDF URLs are read verbatim from `<a class="btn-download">[href]`. Some live
@@ -66,7 +66,7 @@ const MIN_INDEX_ROWS = 100;
 
 // Sanity floor for "did we actually extract policy text?" — anything below this
 // is treated as a fetch/parse failure and NOT cached, so a transient outage
-// cannot poison the policy cache for 24h. See codex_review.md F3.
+// cannot poison the policy cache for 24h. See docs/BUILD.md F3.
 const MIN_USABLE_POLICY_TEXT_CHARS = 200;
 
 export function isPolicyTextUsable(text: string): boolean {
@@ -77,7 +77,7 @@ export function isPolicyTextUsable(text: string): boolean {
 
 const indexCache = new TTLCache<PolicyIndex>(INDEX_TTL_MS);
 
-// Per PLAN.md: in-memory by default; opt in to disk persistence for the 24h
+// In-memory by default; opt in to disk persistence for the 24h
 // policy-body cache via env var so PDFs survive process restarts. Index cache
 // stays in-memory (its value type contains cheerio-derived Maps that don't
 // JSON round-trip cleanly, and a cold rescrape is cheap anyway).
@@ -283,7 +283,7 @@ export async function fetchPolicy(numberOrSlug: string): Promise<PolicyDocument>
 
   const doc = await fetchPolicyBody(entry);
   if (!isPolicyTextUsable(doc.text)) {
-    // F3 (codex_review.md): when PDF + landing fallback both produce empty or
+    // F3 (see docs/BUILD.md): when PDF + landing fallback both produce empty or
     // garbage text, throw rather than caching a poisoned doc for 24h. Caller
     // sees a structured error and can refuse instead of answering from nothing.
     log("error", "fetchPolicy: refusing to cache policy with unusable text", {

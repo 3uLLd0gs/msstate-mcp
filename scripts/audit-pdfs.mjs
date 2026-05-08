@@ -4,7 +4,7 @@
  * through pdf-parse, then writes a CSV summary to msstate-policies/eval/
  * audit-YYYY-MM-DD.csv.
  *
- * Pass criteria (from PLAN.md): >=95% of PDFs yield >=500 chars/page on
+ * Pass criteria (from docs/BUILD.md): >=95% of PDFs yield >=500 chars/page on
  * average; <5% with parse_error. Below that, switch to pdfjs-dist.
  */
 import { mkdirSync, writeFileSync } from "node:fs";

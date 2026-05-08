@@ -4,7 +4,7 @@ This file is loaded automatically by Claude Code when it operates in this repo. 
 
 ## What this repo is
 
-`msstate-mcp` is a Model Context Protocol server that exposes **Mississippi State University Operating Policies** (the `/current` index at <https://www.policies.msstate.edu/current>) to MCP-capable clients (Claude Code, Claude Desktop, Cursor, Windsurf, Zed, claude.ai connector). The authoritative spec is `PLAN.md` in this directory — read it once before writing any code.
+`msstate-mcp` is a Model Context Protocol server that exposes **Mississippi State University Operating Policies** (the `/current` index at <https://www.policies.msstate.edu/current>) to MCP-capable clients (Claude Code, Claude Desktop, Cursor, Windsurf, Zed, claude.ai connector). For project overview, architecture, decision history, eval methodology, and open issues, see [`docs/BUILD.md`](./docs/BUILD.md). Read it once before non-trivial work.
 
 The server ships in two surfaces from one bundle:
 - **Claude Code plugin** (`/plugin install msstate-policies@msstate-mcp`)
@@ -26,12 +26,12 @@ This is non-negotiable and applies to every Claude session that touches this rep
 - Do use `WebFetch` and `curl` for `policies.msstate.edu` and its `*.msstate.edu` subdomains only when needed to verify selectors, audit PDFs, or seed fixtures.
 - Do label any string in the codebase that didn't come from the live site as "placeholder" or "example only" so a future maintainer doesn't mistake it for ground truth.
 
-The whole grounding story of this MCP collapses if its inputs are contaminated by anything other than what MSU publishes. A wrong answer to "what's the policy on amnesty?" is the worst-case failure mode (PLAN.md targets 99.99% answer correctness). The simplest defense is the corpus rule above.
+The whole grounding story of this MCP collapses if its inputs are contaminated by anything other than what MSU publishes. A wrong answer to "what's the policy on amnesty?" is the worst-case failure mode (the design targets 99.99% answer correctness as the north star). The simplest defense is the corpus rule above.
 
 ## Network access notes
 
 - Codespace / dev sandbox: **has** network access to `policies.msstate.edu`.
-- Some prior sessions ran in sandboxes that didn't — PLAN.md still contains a few "user will run this" notes from that era. Where you have network, you can run them yourself; where you don't, defer.
+- Some prior sessions ran in sandboxes that didn't — `docs/BUILD.md` still contains a few "user will run this" notes from that era. Where you have network, you can run them yourself; where you don't, defer.
 
 ## Build / run notes
 

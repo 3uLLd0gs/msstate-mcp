@@ -6,7 +6,7 @@
  *
  * NO TRAINED-KNOWLEDGE RULE: the bundle's contents come purely from
  * policies.msstate.edu. We pull the live index, pick policies whose titles
- * match curated keywords (high-traffic categories from PLAN.md), and zip the
+ * match curated keywords (high-traffic categories from docs/BUILD.md), and zip the
  * actual PDFs MSU is currently serving.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -18,7 +18,7 @@ import { load as cheerioLoad } from "cheerio";
 const BASE = "https://www.policies.msstate.edu";
 const UA = "msstate-policies-mcp/0.1.0 (build-project-bundle)";
 
-// Curated by title-keyword for now — high-traffic categories from PLAN.md.
+// Curated by title-keyword for now — high-traffic categories from docs/BUILD.md.
 // Refine when usage data exists. Patterns are matched case-insensitively.
 const CURATION_PATTERNS = [
   /amnesty/i,

@@ -13,7 +13,7 @@ export interface TTLCacheOptions {
   /**
    * When set, the cache persists to disk under
    * `${persistDir or env-paths('msstate-policies-mcp').cache}/${persistKey}.json`.
-   * Per PLAN.md the policy-body cache opts in via env var; the index cache
+   * The policy-body cache opts in via env var; the index cache
    * stays in-memory because its values include cheerio-derived Maps.
    */
   persistKey?: string;

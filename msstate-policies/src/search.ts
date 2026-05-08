@@ -243,13 +243,13 @@ const RRF_K = 60;
 //   "hybrid" -> RRF fusion of both signals.
 //
 // Default is "bm25" per the 2026-05-08 comparative eval (see
-// msstate-policies/eval/COMPARATIVE-2026-05-08.md): BM25 ties embed at
-// composite 86/88 and beats hybrid (RRF) at 84/88. Hybrid uniquely failed
-// the underage-drinking-at-tailgate case because embedding-side concept
-// drift ranked Sexual Misconduct (03.04) above the canonical Sanctions for
+// docs/BUILD.md "Comparative retrieval eval"): BM25 ties embed at composite
+// 86/88 and beats hybrid (RRF) at 84/88. Hybrid uniquely failed the
+// underage-drinking-at-tailgate case because embedding-side concept drift
+// ranked Sexual Misconduct (03.04) above the canonical Sanctions for
 // Alcohol and Drug Offenses (91.119), and RRF's rank-averaging let that
-// stand. Per Sprint 2 task 2.9 ("if RRF underperforms either method,
-// configure to use the winning method"), default to BM25.
+// stand. Per "if RRF underperforms either method, configure to use the
+// winning method," default to BM25.
 //
 // Unrecognized / unset value falls back to "bm25" so the default path is
 // preserved when the var is absent. embedSearch already returns [] when no
@@ -338,7 +338,7 @@ export function getSearchHealth(): {
   };
 }
 
-// ---- Matched-passage extraction (F4 in codex_review.md) ---------------------
+// ---- Matched-passage extraction (F4; see docs/BUILD.md) --------------------
 //
 // Returns substrings of `text` centered on hits of `queryTokens`. Lets callers
 // surface "primary evidence" alongside the full body so the model isn't asked
@@ -421,7 +421,7 @@ export function extractMatchedPassages(
   return passages.slice(0, maxPassages);
 }
 
-// ---- Pre-attach bodies from shipped embeddings (F1 in codex_review.md) -----
+// ---- Pre-attach bodies from shipped embeddings (F1; see docs/BUILD.md) -----
 //
 // Without this, bm25Search runs against title+number tokens only at production
 // startup (bodies are loaded lazily by corpus.ts AFTER ranking, which is too
@@ -452,7 +452,7 @@ export function attachBodiesFromEmbeddings(): { attached: number; chunks: number
   return { attached, chunks: ef.chunks.length };
 }
 
-// ---- Retrieval confidence gate (F2 in codex_review.md) ---------------------
+// ---- Retrieval confidence gate (F2; see docs/BUILD.md) --------------------
 //
 // Returns a calibrated accept/reject decision instead of letting downstream
 // code blindly trust hybridSearch's top-k. Lets the MCP layer say "no relevant

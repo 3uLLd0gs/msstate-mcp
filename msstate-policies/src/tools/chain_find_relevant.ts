@@ -27,7 +27,7 @@ const ChainInput = z.object({
     ),
 });
 
-// ---- F4 evidence assembly (codex_review.md) ---------------------------------
+// ---- F4 evidence assembly (see docs/BUILD.md) ---------------------------------
 //
 // Pure mapper: PolicyDocument[] -> the MCP tool's results envelope, with a
 // per-result primaryEvidence array of short matched-passage windows. Lets the
@@ -89,7 +89,7 @@ export const chain_find_relevant_policies = {
     const input = ChainInput.parse(rawInput);
     const idx = await fetchIndex();
     indexEntries(idx.rows);
-    // F1 (codex_review.md): seed BM25 body tokens from the shipped embeddings
+    // F1 (see docs/BUILD.md): seed BM25 body tokens from the shipped embeddings
     // chunks BEFORE hybridSearch. Without this, body-only queries (e.g.
     // "tornado warning") miss policies whose titles don't contain the term.
     // No-op when embeddings.json is absent; fail-degraded, not silently wrong.
@@ -97,7 +97,7 @@ export const chain_find_relevant_policies = {
 
     const fused = await hybridSearch(input.question, { topK: input.k });
 
-    // F2 (codex_review.md): gate on confidence at the MCP layer instead of
+    // F2 (see docs/BUILD.md): gate on confidence at the MCP layer instead of
     // pushing every refusal decision to the LLM. Permissive defaults keep the
     // existing eval set passing; tighter thresholds can be calibrated later.
     const gate = gateRetrieval(fused);
@@ -121,7 +121,7 @@ export const chain_find_relevant_policies = {
     }
 
     const docs = await getPolicies(gate.accept.map((h) => h.slug));
-    // F4 (codex_review.md): build the result envelope through the pure
+    // F4 (see docs/BUILD.md): build the result envelope through the pure
     // buildEvidenceResult helper so each result carries primaryEvidence —
     // short matched-passage windows the model can anchor its quotation in,
     // instead of scanning the entire policy body for the relevant section.
