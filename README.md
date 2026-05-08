@@ -27,6 +27,7 @@ You can ask things like:
 | **claude.ai** in a browser, or **Claude mobile** on iOS/Android | [Add a connector with a URL](#claudeai-web--claude-mobile) | 30 sec |
 | **Claude Code** (CLI) | [Two slash commands](#claude-code) | 30 sec |
 | **Claude Desktop**, **Cursor**, **Windsurf**, **Zed** | [Paste a JSON snippet](#claude-desktop-cursor-windsurf-zed) | 1 min |
+| **OpenAI API** (any ChatGPT plan, including free) | [Python sample](#openai-api) | 1 min |
 | **Free claude.ai** (no MCP support) | [Drag-and-drop a Project starter zip](#free-claudeai-no-install) | 1 min |
 
 ---
@@ -95,6 +96,57 @@ The first call takes ~5 seconds (the server fetches MSU's index and the relevant
 
 A reference snippet is at [`examples/claude_desktop_config.json`](examples/claude_desktop_config.json).
 
+## OpenAI API
+
+ChatGPT Connectors are gated to Pro/Business/Enterprise plans. If you're on **free ChatGPT** — or you just prefer code — you can use this MCP server directly via OpenAI's Responses API and an OpenAI API key. The API is independent of your ChatGPT subscription tier; sign up at <https://platform.openai.com> and add a few dollars of credit (queries are typically a few cents each).
+
+**Setup:**
+
+```bash
+pip install openai
+export OPENAI_API_KEY=sk-...
+```
+
+**Minimum example:**
+
+```python
+from openai import OpenAI
+
+INSTRUCTIONS = """You answer questions about Mississippi State University Operating Policies using the msstate-policies MCP server.
+
+Rules:
+1. When calling chain_find_relevant_policies, always pass k=5 (the maximum) so the model sees a wider candidate set.
+2. If the question is not about MSU policies (e.g., weather, sports scores, news, current events, individuals' personal info), refuse plainly: state that this server only covers Mississippi State University Operating Policies and suggest contacting an appropriate alternative source. Do not invent a policy or speculate.
+3. Quote verbatim from policy text and cite the OP number + canonical URL for any normative claim."""
+
+client = OpenAI()
+resp = client.responses.create(
+    model="gpt-4o",
+    instructions=INSTRUCTIONS,
+    tools=[{
+        "type": "mcp",
+        "server_label": "msstate-policies",
+        "server_url": "https://msstate-policies-mcp.mminsub90.workers.dev/mcp",
+        "require_approval": "never",
+    }],
+    input="What is MSU's hazing policy?",
+)
+
+for item in resp.output:
+    if getattr(item, "type", None) == "message":
+        for c in item.content:
+            if getattr(c, "type", None) == "output_text":
+                print(c.text)
+```
+
+A runnable version is at [`examples/openai_api_sample.py`](examples/openai_api_sample.py). Pass a custom question as the first argument:
+
+```bash
+python examples/openai_api_sample.py "What's MSU's policy on academic amnesty?"
+```
+
+**What to expect:** GPT-4o produces grounded answers with the same citation discipline as Claude — verbatim quotes, OP numbers, canonical URLs, retrieval timestamps. Cross-model quality is validated against a 10-question eval ([`eval-2026-05-08-k5-gpt-4o.json`](msstate-policies/eval/eval-2026-05-08-k5-gpt-4o.json)).
+
 ## Free claude.ai (no install)
 
 If you can't install MCP servers (e.g. you're on a free claude.ai plan), there's still a path: a curated **starter zip** with 22 high-traffic policy PDFs and a system-prompt template that pushes Claude toward verbatim quoting.
@@ -143,6 +195,7 @@ In default mode, your queries never leave your machine. The only outbound traffi
 
 - **Claude Code / Desktop / Cursor / Windsurf / Zed** (local install): truly local. The MCP server runs on your machine.
 - **claude.ai web / mobile via the connector**: your query goes to Anthropic (as it always does on claude.ai) and to the hosted Cloudflare Worker, which only fetches from the snapshot — never sends your query elsewhere.
+- **OpenAI API**: your query goes to OpenAI's models and to the hosted Cloudflare Worker. No traffic to Anthropic in this mode. The Worker still only fetches from MSU and stores no logs of your queries beyond Cloudflare's standard request metadata.
 - **Sensitive topics** (Title IX, harassment, FERPA): the local install is the most private option. The connector is fine for general policy questions; for sensitive ones, the local path keeps everything on your machine.
 
 If you opt in to semantic retrieval (set `MSSTATE_POLICIES_RETRIEVAL=embed` or `=hybrid`), your natural-language query is sent to OpenAI for embedding. **The default `bm25` mode does not require this and is recommended for most users.**
