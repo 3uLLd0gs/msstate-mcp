@@ -507,6 +507,25 @@ export default {
 
     // MCP JSON-RPC endpoint.
     if (request.method === "POST" && url.pathname === "/mcp") {
+      // N4: reject oversize bodies BEFORE request.json() runs. MAX_QUERY_CHARS
+      // (4096) only fires on tool args after parse; without this gate, a 50MB
+      // JSON body whose query field is small still costs us full JSON-parse
+      // CPU. 64 KB is more than 10x the largest legitimate JSON-RPC envelope
+      // we ever produce.
+      const contentLength = Number(request.headers.get("content-length") ?? "0");
+      if (contentLength > 64_000) {
+        return withCors(
+          new Response(
+            JSON.stringify({
+              jsonrpc: "2.0",
+              id: null,
+              error: { code: -32600, message: "Request too large." },
+            }),
+            { status: 413, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+
       let body: JsonRpcRequest;
       try {
         body = (await request.json()) as JsonRpcRequest;
