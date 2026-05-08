@@ -39,21 +39,24 @@ const TOOLS_BY_NAME = new Map<string, ToolDef>(
   TOOLS.map((t) => [t.name, t]),
 );
 
-declare const __VERSION__: string;
-declare const __GIT_SHA__: string;
+// N8: esbuild's `define` rewrites these literals at build time. When the
+// bundler hasn't run (e.g. running src/ directly via tsx in tests), the
+// declared names are still bound by tsc's `declare` shim. Reading them
+// inside a typeof guard avoids ReferenceError without needing `new Function`.
+declare const __VERSION__: string | undefined;
+declare const __GIT_SHA__: string | undefined;
 
-function getStringConst(name: "__VERSION__" | "__GIT_SHA__"): string {
-  try {
-    // eslint-disable-next-line no-new-func
-    return new Function(`return typeof ${name} !== "undefined" ? ${name} : ""`)();
-  } catch {
-    return "";
-  }
+function safeVersion(): string {
+  return typeof __VERSION__ !== "undefined" ? __VERSION__ : "";
+}
+
+function safeGitSha(): string {
+  return typeof __GIT_SHA__ !== "undefined" ? __GIT_SHA__ : "";
 }
 
 async function main(): Promise<void> {
-  const version = getStringConst("__VERSION__") || "unknown";
-  const gitSha = getStringConst("__GIT_SHA__") || "unknown";
+  const version = safeVersion() || "unknown";
+  const gitSha = safeGitSha() || "unknown";
 
   log("info", "msstate-policies-mcp starting", {
     version,
