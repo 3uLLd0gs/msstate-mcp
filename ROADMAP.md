@@ -1,9 +1,35 @@
 # Roadmap — MSU Policies MCP Server
 
-**Date**: 2026-05-07
+**Date**: 2026-05-07 (initial), **status updated 2026-05-08**
 **Format**: outcome-focused. Each phase states the user/portfolio outcome first; tasks are supporting evidence, not the goal itself.
-**Sources**: [`PLAN.md`](./PLAN.md) v6, [`PRD.md`](./PRD.md), [`PRE_MORTEM.md`](./PRE_MORTEM.md), [`USER_STORIES.md`](./USER_STORIES.md).
+**Sources**: [`PLAN.md`](./PLAN.md) v6, [`PRD.md`](./PRD.md), [`PRE_MORTEM.md`](./PRE_MORTEM.md), [`USER_STORIES.md`](./USER_STORIES.md), [`plan-codex-fixes.md`](./plan-codex-fixes.md).
 **Time horizon**: 3 sprints to v1.0, then a 60-day watch phase, then optional v2.0. **No calendar dates** — sprints are gated by exit criteria, not weeks. Solo portfolio project; explicit flexibility.
+
+---
+
+## Status snapshot (2026-05-08)
+
+**Where we are:** mid-Sprint 2. Codebase exists end-to-end (`dist/index.js`, `dist/embeddings.json`, `src/*`, `tests/*`, `scripts/*`) — Sprint 1 code is in place but `v0.1.0-alpha` was never formally tagged. Sprint 2 hybrid-retrieval, embedding pipeline, and eval harness are all implemented; first eval runs are committed under `eval/`.
+
+**Most recent work — Codex adversarial review fix loop (CLOSED 2026-05-08):**
+
+Six `experiment:` commits (`75244b9` → `fd4bfde`) closed all four findings in `codex_review.md`. One Sonnet-judge eval at k=5 confirmed clean improvement; recorded in commit `ba7e67e`. See `plan-codex-fixes.md` for per-finding closure detail.
+
+| | Baseline (2026-05-07) | Post-fix (2026-05-08) | Δ |
+|---|---:|---:|---:|
+| Retrieval | 37 / 38 | 37 / 38 | = |
+| Answer | 32 / 37 | **37 / 38** | **+5** |
+| Refusal | 12 / 12 | 12 / 12 | = |
+| Composite | 81 / 87 | **86 / 88** | **+5** |
+
+Both runs: 50 questions, k=5, BM25-only retrieval (`OPENAI_API_KEY` unset). Tests **11/11**, typecheck clean.
+
+**Next steps (in priority order):**
+
+1. **Empirical F2 threshold calibration.** `DEFAULT_MIN_SCORE=0.01` was picked from RRF math, not data; `scripts/calibrate-thresholds.mts` already exists for this purpose — needs to be run + analyzed. Tighter threshold should catch out-of-scope queries at the MCP layer rather than the LLM layer.
+2. **Hybrid-mode validation.** Re-run eval with `OPENAI_API_KEY` set to measure hybrid retrieval against the validated BM25-only baseline.
+3. **Close Sprint 2 eval gates.** Composite 86/88 = 97.7% is short of ≥99% retrieval and 0 observed answer errors. Remaining: 1 retrieval miss (tornado conceptual at k=5), 1 answer miss.
+4. **Tag `v0.2.0-beta`** once gates close.
 
 ---
 
@@ -133,15 +159,25 @@ Evenings only: multiply by ~2.5×.
 
 ## Definition of Done
 
-- [ ] Hybrid retrieval (BM25 + pre-computed embeddings, RRF fusion) live; eval shows hybrid beats either method standalone, OR config falls back to whichever wins.
-- [ ] `dist/embeddings.json` committed (~5 MB, all 218 policies chunked + embedded).
-- [ ] BM25-only fallback works cleanly when `OPENAI_API_KEY` is unset; stderr discloses retrieval mode on every startup.
-- [ ] 50 eval questions complete with ≥ 15 externally sourced (Tiger T2). `eval/SOURCES.md` documents attribution.
-- [ ] First eval run committed under `eval/eval-{date}.json` with three sub-metric scores. Manual review of 100% of LLM-judge answers complete.
-- [ ] Eval gates: retrieval ≥ 99%, answer correctness 0 observed errors, refusal correctness 100%.
+- [x] Hybrid retrieval (BM25 + pre-computed embeddings, RRF fusion) **live** in `src/search.ts`. *(Comparative eval — hybrid vs BM25-only vs embeddings-only — still open; see task 2.9.)*
+- [x] `dist/embeddings.json` committed (~24 MB; all policies embedded via `scripts/build-embeddings.mjs`).
+- [x] BM25-only fallback works cleanly when `OPENAI_API_KEY` is unset. *(Validated 2026-05-08 — post-codex-fix-loop eval ran in BM25-only mode and held 37/38 retrieval at k=5.)* Stderr retrieval-mode disclosure on every startup: not separately verified.
+- [ ] 50 eval questions complete with ≥ 15 externally sourced (Tiger T2). *(50 questions exist in `eval/questions.jsonl`; `eval/SOURCES.md` does not exist yet — external sourcing + attribution still open.)*
+- [x] First eval run committed under `eval/eval-{date}.json` with three sub-metric scores. *(Multiple runs committed; latest is `eval-2026-05-08-k5-sonnet-4-6.json`.)* Manual review of 100% of LLM-judge answers: not separately verified.
+- [ ] Eval gates: retrieval ≥ 99%, answer correctness 0 observed errors, refusal correctness 100%. *(Current: retrieval 37/38 = 97.4%, answer 37/38 = 1 error, refusal 12/12 = 100%. Refusal met; retrieval and answer still short.)*
 - [ ] Disk cache via `env-paths` (cross-platform); WAF detection battle-tested against real failure responses.
 - [ ] T4 disclaimer surfacing rate ≥ 80% on a 5-question high-stakes subset across Claude Sonnet, Claude Opus, and one non-Claude client.
 - [ ] Tag `v0.2.0-beta`.
+
+### Codex adversarial review fix loop — CLOSED (2026-05-08)
+
+Side-track that landed mid-Sprint-2 in response to the `codex_review.md` adversarial review. All four findings closed in 6 `experiment:` commits; validated by Sonnet-judge eval at k=5. See [`plan-codex-fixes.md`](./plan-codex-fixes.md) for per-finding closure detail.
+
+- [x] **F1** — body tokens pre-attached before BM25 (`3f6b743`); BM25-only path no longer degrades to title-only.
+- [x] **F2** — `gateRetrieval` confidence gate shipped with `DEFAULT_MIN_SCORE=0.01` (`0edf9e4` + `dc0735f`). Empirical calibration is the open follow-up — `scripts/calibrate-thresholds.mts` exists, needs to be run + analyzed.
+- [x] **F3** — `fetchPolicy` fails closed on unusable PDF text via `MIN_USABLE_POLICY_TEXT_CHARS=200` (`75244b9`).
+- [x] **F4** — matched-passage extractor surfaces `primaryEvidence` per result (`cba897f` + `fd4bfde`). Headline win: answer-pass 32 → 37 (+5).
+- [x] Validation eval recorded (`ba7e67e`); `npm test` 11/11; `npm run typecheck` clean.
 
 ## Tasks (dependency-ordered)
 
