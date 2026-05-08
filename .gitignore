@@ -13,5 +13,9 @@ tmp/
 .claude/skills/
 skills-lock.json
 
+# dist-bundle/ holds the Project starter zip built by scripts/build-project-bundle.mjs.
+# Released as a GitHub release asset on each tag; not committed.
+dist-bundle/
+
 # We commit dist/ on purpose — the plugin path resolves to ${CLAUDE_PLUGIN_ROOT}/dist/index.js
 # without an npm install step. CI verifies dist/ matches src/ via `git diff --exit-code dist/`.
