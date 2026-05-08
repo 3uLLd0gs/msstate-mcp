@@ -511,12 +511,17 @@ export default {
       try {
         body = (await request.json()) as JsonRpcRequest;
       } catch (err) {
+        // Don't echo (err as Error).message to the client — a malformed body's
+        // exception text could leak parser internals or mirror attacker input
+        // back into a response. Log server-side via the platform's runtime
+        // logs and return a generic JSON-RPC parse error.
+        console.error("MCP parse error", { name: (err as Error)?.name });
         return withCors(
           new Response(
             JSON.stringify({
               jsonrpc: "2.0",
               id: null,
-              error: { code: -32700, message: `Parse error: ${(err as Error).message}` },
+              error: { code: -32700, message: "Parse error. Body must be valid JSON-RPC 2.0." },
             }),
             { status: 400, headers: { "Content-Type": "application/json" } },
           ),
