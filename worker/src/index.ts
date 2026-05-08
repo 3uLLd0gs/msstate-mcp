@@ -543,7 +543,15 @@ export default {
         // internal paths, stack frames, or partially-evaluated state. Log
         // server-side via the platform's runtime logs and return a
         // generic message with the request id for correlation.
-        console.error("MCP handler error", err);
+        //
+        // N5: log only structured fields, not the bare `err` — passing the
+        // Error object lets CF Workers Logs auto-serialize err.stack, which
+        // leaks internal paths to anyone with dashboard access.
+        console.error("MCP handler error", {
+          method: body.method,
+          name: (err as Error)?.name,
+          message: (err as Error)?.message,
+        });
         return withCors(
           new Response(
             JSON.stringify({
