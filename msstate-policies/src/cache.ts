@@ -40,7 +40,11 @@ export class TTLCache<T> {
     try {
       const baseDir =
         optsOrTtlMs.persistDir ?? envPaths("msstate-policies-mcp").cache;
-      mkdirSync(baseDir, { recursive: true });
+      // N9: explicit 0o700 / 0o600 modes so the cache isn't world-readable
+      // on multi-user hosts. Default umask leaks which policies a user has
+      // queried (the bodies themselves are public, but the access pattern
+      // isn't).
+      mkdirSync(baseDir, { recursive: true, mode: 0o700 });
       this.persistPath = pathResolve(baseDir, `${optsOrTtlMs.persistKey}.json`);
       this.loadFromDisk();
     } catch (err) {
@@ -111,7 +115,9 @@ export class TTLCache<T> {
         key,
         entry,
       }));
-      writeFileSync(this.persistPath, JSON.stringify(arr));
+      // N9: owner-only file mode so the cache contents aren't readable by
+      // other users on shared hosts.
+      writeFileSync(this.persistPath, JSON.stringify(arr), { mode: 0o600 });
     } catch {
       // Best-effort. Don't throw from get/set.
     }
