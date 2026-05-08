@@ -371,6 +371,60 @@ CI runs typecheck + build + `git diff --exit-code dist/` + tests + `tools/list` 
 | `MSSTATE_POLICIES_RETRIEVAL` | `bm25` (default) / `embed` / `hybrid`. Controls retrieval mode. |
 | `MSSTATE_POLICIES_CACHE` | Set to `disk` to enable cross-platform on-disk policy-body cache via env-paths. Default in-memory. |
 
+## Security
+
+Reporting flow + supported versions live in [`SECURITY.md`](../SECURITY.md). This section captures the architectural pieces — threat model, trust anchor, deferred items — that maintainers need when reasoning about changes.
+
+### Threat model
+
+The deployment surface is shaped by three realities, and the threat model follows from them:
+
+| Surface | Threat | Mitigation |
+|---|---|---|
+| **Public Cloudflare Worker** at `https://msstate-policies-mcp.mminsub90.workers.dev` (no auth, open CORS) | DoS to exhaust Cloudflare free tier; resource-consumption via oversized payloads; abuse as a free policy-lookup proxy | CF DDoS protection; input length cap (`MAX_QUERY_CHARS=4096`) on `query`/`question` in tool handlers; generic error messages so internal state doesn't leak via `err.message` |
+| **Published npm package** (`msstate-policies-mcp`) | Supply-chain compromise (typosquatted or malicious version); compromised release artifacts | 2FA on npm account + granular tokens with short TTL; `prepublishOnly` builds from src; future publishes should use `npm publish --provenance` from CI (see "Provenance" below) |
+| **Stdio MCP server** (local install) | PDF prompt injection (only if MSU's site is compromised); supply-chain via `npx -y` resolving to a malicious version; `pdf-parse@1.1.1` is pinned-old | Tool description pushes verbatim quoting + refusal-on-uncertainty; corpus rule constrains all inputs to MSU domain; `pdf-parse` only runs at build time on the Worker variant |
+| **Build pipeline** (`scripts/build-*.mjs`) | Tampered output (corpus.json or embeddings.json) baked into deploy artifact | Build runs against live MSU site (TLS); commits are visible in git; CI verifies `git diff --exit-code dist/` after rebuilds |
+
+The Worker's lack of auth is **intentional** — claude.ai's connector requires HTTP/SSE without app-level auth. Treating "open Worker" as a vulnerability would defeat the install path. Rate-limiting via Durable Objects is documented as a deferred item below.
+
+### Corpus rule = trust anchor
+
+The single load-bearing security claim is the corpus rule (mirrored in [`CLAUDE.md`](../CLAUDE.md) and the project overview at the top of this doc):
+
+> Every fact this server returns must trace back to an HTTP fetch of `policies.msstate.edu` made by *this* server.
+
+Everything else — verbatim-quoting tool descriptions, refusal-on-uncertainty rules, the lack of an `expected_op_numbers` heuristic — is downstream of that. If an attacker can plant content in `worker/corpus.json` or in the live PDFs that this server doesn't actually fetch, the trust model collapses.
+
+Implications for security review:
+
+- Any change that introduces a non-MSU data source is a **breaking change to the security model**, not just a functional one.
+- The verifier `tools/security-checklist.sh` includes a `corpus rule + trust` check (L4) so future BUILD.md edits don't accidentally drop this section.
+- A malicious PDF on `policies.msstate.edu` (requires MSU site control) is **the only viable prompt-injection vector**. The mitigation is the verbatim-quoting tool description plus the user's ability to verify against the canonical landing URL in every response.
+
+### Provenance for npm releases
+
+The current `npm publish` flow on a developer machine produces an unsigned tarball. Moving forward, releases should use [npm provenance](https://docs.npmjs.com/generating-provenance-statements) so the package metadata cryptographically links to the source commit:
+
+```bash
+# In a GitHub Actions workflow with id-token: write permission:
+npm publish --provenance
+```
+
+This requires running from a trusted CI (GitHub Actions, GitLab CI, CircleCI, Buildkite). It's a deferred-but-recommended item: when we set up the next release pipeline, do it with provenance, not without. Until then, package signature is "trust the maintainer's npm 2FA + the GitHub commit history."
+
+### Deferred security items
+
+These are known and intentionally not in scope for the current release pass. Each has a reason and a rough cost estimate.
+
+| Item | Why deferred | What it would cost |
+|---|---|---|
+| **M1 — Worker rate limiting** | Anonymous public endpoint with CF free-tier limits is acceptable. Real DoS would burn 100k req/day, then the Worker stops responding until reset — annoying, not catastrophic. | Durable Objects per-IP counter (paid plan), or a Cloudflare WAF custom rule. ~½ day of work + ~$5/mo on the cheapest paid CF tier. Implement when actual abuse is observed in CF logs. |
+| **M2 — GitHub branch protection** | Codespaces-issued GITHUB_TOKEN lacks admin scope (HTTP 403 on `gh repo edit --default-branch` and on adding rules). Single-maintainer repo so the day-to-day risk of a stray force-push is low. | One-time GitHub Settings click-through: require PR + status checks on `main`. ~5 min when the maintainer is signed in via the GitHub UI. |
+| **M6 — Automated weekly corpus rebuild** | Stale-content drift exists but the freshness loss between manual rebuilds is small (most policies don't change month-to-month). Adding a CI cron means storing a long-lived Cloudflare API token in GitHub Secrets — meaningful trust-shift. | GitHub Actions workflow + a CF token scoped to `Edit Cloudflare Workers` only, with rotation reminders. ~½ day of work + ongoing token-hygiene discipline. |
+
+If any of these items become real (DDoS observed, policy-text drift complaint, accidental force-push), revisit the cost-benefit. They're tracked here rather than in a separate ticket so a future maintainer reading this doc sees the full backlog.
+
 ## Conventions
 
 - Single-responsibility files. `chain_find_relevant.ts` orchestrates; index/scoring lives in `search.ts`/`corpus.ts`; gating in pure `gateRetrieval`; evidence assembly in `buildEvidenceResult`.
