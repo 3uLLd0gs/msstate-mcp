@@ -39,10 +39,31 @@ const METADATA_PATTERNS = [
   ["approvedBy", /approved\s+by\s*[:\-]\s*(.+)/i],
 ];
 
+// N7: detect WAF / antibot challenge pages so a transient interstitial during
+// build doesn't silently poison corpus.json. Mirrors the runtime scraper's
+// looksLikeWafChallenge in msstate-policies/src/http.ts. Required before
+// any future M6 (auto-rebuild) cron lands.
+function looksLikeWafChallenge(body) {
+  if (body.includes("Just a moment...")) return true; // Cloudflare interstitial
+  if (body.includes("cf-chl-bypass")) return true;
+  if (/<meta\s+http-equiv=["']refresh["'][^>]+url=[^>]*token=/i.test(body)) return true;
+  // F5 antibot served a bare shell with no data table
+  const isAntibotShell =
+    /<form[^>]+class=["'][^"']*antibot/i.test(body) &&
+    !/id=["']datatable["']/.test(body);
+  return isAntibotShell;
+}
+
 async function fetchText(url) {
   const res = await fetch(url, { headers: { "User-Agent": UA } });
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-  return await res.text();
+  const text = await res.text();
+  if (looksLikeWafChallenge(text)) {
+    throw new Error(
+      `WAF / antibot challenge detected for ${url} — refusing to ship a poisoned corpus`,
+    );
+  }
+  return text;
 }
 
 async function fetchBuffer(url) {
