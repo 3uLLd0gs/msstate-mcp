@@ -13,7 +13,7 @@ If you find a security issue in `msstate-mcp` or the deployed Cloudflare Worker 
 
 **Please include:**
 
-1. A description of the issue and the affected component (stdio MCP server, Cloudflare Worker, npm package, build scripts, or `worker/corpus.json` content).
+1. A description of the issue and the affected component (stdio MCP server, Cloudflare Worker, npm package, build scripts, `worker/corpus.json` content including the `academic_calendar` block, or any of the six MSU calendar source URLs in the [CLAUDE.md corpus extension](CLAUDE.md#corpus-extension-2026-05-11--academic-dates)).
 2. Reproduction steps or proof-of-concept. Mask any tokens or credentials in the report — even if the credential *is* the vulnerability.
 3. The version (commit SHA, npm package version, or Worker deploy URL) you observed the issue on.
 4. Your assessment of impact (information disclosure, privilege escalation, denial of service, supply chain, etc.).
@@ -40,11 +40,11 @@ This project follows simple supported-version rules:
 Reportable issues include:
 
 - Code execution, supply-chain attacks (typosquatting, malicious dependencies), or compromised release artifacts.
-- Information disclosure beyond what `policies.msstate.edu` already publishes (e.g., server-side state, internal paths, request logs leaking through error messages).
+- Information disclosure beyond what the MSU source URLs already publish (e.g., server-side state, internal paths, request logs leaking through error messages).
 - Authentication/authorization bypass on the deployed Worker (currently no auth — abuse of the open endpoint is a known limitation, not a vulnerability).
 - Denial of service against the Worker that exceeds Cloudflare's standard DDoS protection.
-- Prompt injection via planted content in `worker/corpus.json` if the build pipeline can be subverted.
-- Misuse of the corpus rule (claims that the server returns content NOT from `policies.msstate.edu`).
+- Prompt injection via planted content in `worker/corpus.json` (policies or `academic_calendar` block) if the build pipeline can be subverted.
+- Misuse of the corpus rule — claims that the server returns content NOT from `policies.msstate.edu` or one of the six MSU calendar URLs hardcoded in `msstate-policies/src/calendars/types.ts`.
 
 ## What's NOT in scope
 
@@ -63,10 +63,10 @@ Several abuse classes that come up in MCP threat-modelling are **explicitly outs
 - A user instructs the LLM to ignore the tool description's rules — verbatim quotation, citation, refusal-on-low-confidence — and to "just answer from training data." The tool description is a *suggestion* to the model; the model and its operator are the trust principals here. Prompt-level circumvention cannot be prevented from the server, and pretending it can would be a worse failure mode than disclaiming it.
 - A user runs `npx msstate-policies-mcp` and points it at a forked corpus, a non-MSU mirror, or a hand-edited local copy. Same boundary — local execution, local trust. The corpus rule binds the *maintainer* of this repo, not consumers of the published artifact.
 - The LLM hallucinates an answer despite the tool returning empty results, refusing on a low-confidence gate, or surfacing the in-payload `disclaimer`. Those signals are best-effort hints to the model, not enforcement; an LLM that ignores them is not within our control.
-- Indirect prompt injection embedded inside MSU policy PDFs themselves (e.g. an attacker who got something published into an OP). The defense lives upstream at MSU's policy authoring/review process — we faithfully relay the published text.
+- Indirect prompt injection embedded inside MSU policy PDFs or calendar pages themselves (e.g. an attacker who got something published into an OP or a registrar sub-page). The defense lives upstream at MSU's publishing/review process — we faithfully relay the published text.
 
-If you find a way to violate the server-side corpus rule (i.e. make the *server itself* return content that does NOT come from `policies.msstate.edu`), that is in scope and falls under the reporting flow above.
+If you find a way to violate the server-side corpus rule (i.e. make the *server itself* return content that does NOT come from `policies.msstate.edu` or one of the six MSU calendar URLs listed in [CLAUDE.md](CLAUDE.md#corpus-extension-2026-05-11--academic-dates)), that is in scope and falls under the reporting flow above.
 
 ## Trust model
 
-The corpus rule (see [`CLAUDE.md`](CLAUDE.md) and [`docs/BUILD.md`](docs/BUILD.md)) is the load-bearing security claim: every fact this server returns must trace back to an HTTP fetch of `policies.msstate.edu`. If you find a way to make the server return content that does NOT come from that source, that is a critical vulnerability and falls under the reporting flow above.
+The corpus rule (see [`CLAUDE.md`](CLAUDE.md) and [`docs/BUILD.md`](docs/BUILD.md)) is the load-bearing security claim: every fact this server returns must trace back to an HTTP fetch of `policies.msstate.edu` or one of the six MSU calendar URLs in the corpus extension. If you find a way to make the server return content that does NOT come from one of those sources, that is a critical vulnerability and falls under the reporting flow above.

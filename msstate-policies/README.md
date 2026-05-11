@@ -1,6 +1,6 @@
 # msstate-policies-mcp
 
-MCP server exposing Mississippi State University's current Operating Policies (<https://www.policies.msstate.edu/current>). **Unofficial — not affiliated with MSU. Always verify against the official source.**
+MCP server exposing Mississippi State University's current Operating Policies (<https://www.policies.msstate.edu/current>) **and** six MSU academic-date sources (registrar academic + exam calendars, university holidays, graduate school PDFs, financial aid, housing). **Unofficial — not affiliated with MSU. Always verify against the official source.**
 
 This is the publishable npm package and the Claude Code plugin source. See the [repository root README](../README.md) for the user-facing walkthrough, install paths, and what to expect from a response.
 
@@ -16,9 +16,13 @@ npx -y msstate-policies-mcp
 node /path/to/msstate-mcp/msstate-policies/dist/index.js
 ```
 
-## Tools
+## Tools (7)
 
-`search_policies`, `get_policy`, `chain_find_relevant_policies`, `cite_policy`, `health_check` — see the [root README](../README.md#tools).
+**Policies:** `search_policies`, `get_policy`, `chain_find_relevant_policies`, `cite_policy`
+**Calendars (v0.4.0+):** `find_msu_date`, `get_msu_calendar`
+**Diagnostics:** `health_check`
+
+See the [root README](../README.md#what-this-does) for tool descriptions and example responses.
 
 ## Environment variables
 
@@ -26,7 +30,7 @@ node /path/to/msstate-mcp/msstate-policies/dist/index.js
 |---|---|
 | `MSSTATE_POLICIES_RETRIEVAL` | `bm25` (default) / `embed` / `hybrid`. See root README for the comparative-eval rationale. |
 | `OPENAI_API_KEY` | Required at runtime when `MSSTATE_POLICIES_RETRIEVAL` is `embed` or `hybrid` (for query embedding). Otherwise unused. |
-| `MSSTATE_POLICIES_CACHE` | Set to `disk` to enable cross-platform on-disk policy-body cache (24h TTL) via env-paths. Default in-memory only. |
+| `MSSTATE_POLICIES_CACHE` | Set to `disk` to enable cross-platform on-disk cache for policy PDFs (24h TTL) via env-paths. Default in-memory only. Calendar rows use in-memory TTL only (24h stable sources, 6h housing). |
 
 All logging goes to **stderr** only — stdout is reserved for MCP JSON-RPC framing.
 

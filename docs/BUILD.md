@@ -6,15 +6,20 @@ This file consolidates everything that used to live across `PLAN.md`, `PRD.md`, 
 
 ## What this is
 
-A Model Context Protocol server that exposes Mississippi State University's ~218 current Operating Policies (the entire `/current` index at <https://www.policies.msstate.edu/current>) to MCP-capable clients. Ask Claude (or Cursor / Windsurf / Zed / claude.ai) a natural-language policy question; the MCP fetches the relevant policies straight from MSU and Claude answers grounded in that text.
+A Model Context Protocol server that exposes two MSU content areas:
 
-Framed as a **portfolio piece + reusable .edu-policy MCP template**, not an adoption-chasing product. Real audience is small (dozens, not thousands). Optimizations: build quality, eval rigor, template portability. Adoption metrics are watched, not gated.
+- **Operating Policies** — the entire `/current` index at <https://www.policies.msstate.edu/current> (~218 policies).
+- **Academic dates** — six msstate.edu sources (registrar academic + exam calendars, university holidays, graduate-school PDFs, financial aid, housing) — added in v0.4.0 (2026-05-11).
+
+Ask Claude (or Cursor / Windsurf / Zed / claude.ai / ChatGPT Plus connector) a natural-language question; the MCP fetches the relevant content straight from MSU and the model answers grounded in that text. Tool count: 7 (4 policy + 2 calendar + 1 health).
+
+Framed as a **portfolio piece + reusable .edu-content MCP template**, not an adoption-chasing product. Real audience is small (dozens, not thousands). Optimizations: build quality, eval rigor, template portability. Adoption metrics are watched, not gated.
 
 ## Corpus rule (load-bearing — see CLAUDE.md too)
 
-Every fact this server returns must trace back to an HTTP fetch of `policies.msstate.edu` made by *this* server. **No** Claude memory, **no** WebSearch, **no** Wayback Machine, **no** third-party mirror. The whole grounding story collapses if inputs are contaminated. A wrong answer about amnesty / Title IX / FERPA is the worst-case failure mode.
+Every fact this server returns must trace back to an HTTP fetch of `policies.msstate.edu` OR one of the six MSU calendar URLs listed in [CLAUDE.md's corpus extension](../CLAUDE.md#corpus-extension-2026-05-11--academic-dates) — made by *this* server. **No** Claude memory, **no** WebSearch, **no** Wayback Machine, **no** third-party mirror. The whole grounding story collapses if inputs are contaminated. A wrong answer about amnesty / Title IX / FERPA, or the wrong date for finals or move-in, is the worst-case failure mode.
 
-Practical: don't seed `dist/embeddings.json`, the eval set, or any corpus snapshot from anything other than scrape output. Don't author eval `expected_op_numbers` from memory. Either confirm against the live `/current` index or leave a `TODO: confirm against live index`.
+Practical: don't seed `dist/embeddings.json`, the eval set, or any corpus snapshot (policies OR calendars) from anything other than scrape output. Don't author eval `expected_op_numbers` or `expected_start_date` from memory. Either confirm against the live source or leave a `TODO: confirm against live source`.
 
 ## Architecture
 
@@ -31,13 +36,15 @@ msstate-mcp/                              # repo root = Claude Code marketplace
 │   ├── audit-pdfs.mjs                    # one-time pdf-parse yield audit
 │   ├── build-embeddings.mjs              # build dist/embeddings.json
 │   ├── build-project-bundle.mjs          # Claude Project starter zip
-│   ├── build-worker-corpus.mjs           # build worker/corpus.json (Worker variant)
+│   ├── build-worker-corpus.mjs           # build worker/corpus.json (policies + calendars)
+│   ├── _scrape-calendars.ts              # subprocess called by build-worker-corpus.mjs
+│   │                                     #  to scrape the 6 calendar sources (uses tsx)
 │   ├── calibrate-thresholds.mts          # F2 fused/raw-BM25 score sweep
 │   ├── run-eval.mjs                      # MCP-driven eval harness
 │   └── sync-version.mjs                  # syncs package.json -> plugin.json
 ├── worker/                               # Cloudflare Worker variant (HTTP/JSON-RPC)
-│   ├── src/index.ts                      # MCP-over-HTTP, all 5 tools, BM25 only
-│   ├── corpus.json                       # pre-extracted policy text snapshot
+│   ├── src/index.ts                      # MCP-over-HTTP, all 7 tools, BM25 only
+│   ├── corpus.json                       # pre-extracted policies + academic_calendar block
 │   ├── wrangler.toml                     # Cloudflare deploy config
 │   ├── package.json                      # devDeps: wrangler, workers-types
 │   └── tsconfig.json                     # ES2022/WebWorker target
@@ -46,18 +53,31 @@ msstate-mcp/                              # repo root = Claude Code marketplace
     ├── package.json                      # publishable to npm
     ├── build.mjs                         # esbuild bundler
     ├── eval/
-    │   ├── questions.jsonl               # 50 grounded-answer eval questions
+    │   ├── questions.jsonl               # 50 grounded-answer policy eval questions
     │   ├── audit-2026-05-07.csv          # PDF-parse yield audit
-    │   └── eval-2026-05-08-*.json        # eval run results
+    │   ├── eval-2026-05-08-*.json        # policy eval run results
+    │   └── eval-calendars-2026-05-11.json # 16-question calendar eval (v0.4.0)
     ├── tests/                            # tsx --test tests/*.test.ts
+    │   ├── fixtures/calendars/           # captured HTML + 1 PDF for parser tests
+    │   └── parsers-*.test.ts             # per-shape parser tests
     ├── dist/
     │   ├── index.js                      # COMMITTED bundle (~14 MB)
     │   └── embeddings.json               # COMMITTED embeddings (~24 MB)
     └── src/
-        ├── index.ts                      # MCP server entry (stdio)
+        ├── index.ts                      # MCP server entry (stdio) — registers all 7 tools
         ├── log.ts                        # stderr-only structured logger
-        ├── types.ts                      # PolicyEntry, PolicyDocument, PolicyIndex
+        ├── types.ts                      # PolicyEntry, PolicyDocument, PolicyIndex, HealthState
         ├── cache.ts                      # TTLCache<T> (mem + opt-in disk)
+        ├── calendars/                    # Calendar tools (v0.4.0) — parallel to policy modules
+        │   ├── types.ts                  # CalendarSource, CalendarRow, CALENDAR_URLS (hardcoded)
+        │   ├── scraper.ts                # Live-fetch dispatcher for 4 shapes + WAF detection
+        │   ├── corpus.ts                 # TTL-cached loader (24h stable, 6h housing)
+        │   ├── search.ts                 # BM25 over event(×3) + description(×1) + term(×1)
+        │   └── parsers/
+        │       ├── date_table.ts         # Shape A — university_holidays
+        │       ├── term_pages.ts         # Shape B — registrar academic + exam + SFA
+        │       ├── event_list.ts         # Shape C — housing
+        │       └── pdf_calendar.ts       # Shape D — grad school PDFs (via pdf-parse)
         ├── http.ts                       # fetch with UA, retry, WAF detection
         ├── scraper.ts                    # fetchIndex(), fetchPolicy()
         ├── search.ts                     # BM25 + embeddings + RRF + gate
@@ -176,7 +196,7 @@ Two tools (`find_msu_date`, `get_msu_calendar`) cover six msstate.edu calendar s
 - **Shape C** (paginated Drupal event list): housing. Page 1 only.
 - **Shape D** (term-index + per-term PDF files): graduate school. Per-term PDFs parsed via the existing `pdf-parse` dependency. Concurrency 4 with 30s per-PDF timeout.
 
-The original brainstorm misclassified 3 of these as Shape A; the amendment in [`.dev/specs/2026-05-11-msu-calendars-design.md`](../.dev/specs/2026-05-11-msu-calendars-design.md) captures the reclassification.
+The original brainstorm misclassified 3 of these as Shape A; empirical verification of the canonical URLs (which all turned out to be index pages) forced a mid-flight reclassification into 4 shapes. Implementation history in `git log --grep "Shape [ABCD]\|calendar"` on `main`.
 
 Worker reads from `worker/corpus.json`'s `academic_calendar` block; local install live-scrapes with TTL cache (6h housing, 24h others). WAF detection mirrors the policy build â any challenge aborts the calendar block of the build (the build script refuses to ship a poisoned calendar corpus).
 
