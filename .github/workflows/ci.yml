@@ -60,7 +60,9 @@ jobs:
         run: npm audit --audit-level=high
 
       - name: worker npm audit (high+critical)
-        working-directory: ../worker
+        # Use absolute path via github.workspace — the runner doesn't path-resolve
+        # `../worker` against the job's default working-directory (msstate-policies).
+        working-directory: ${{ github.workspace }}/worker
         run: |
           if [ -f package-lock.json ]; then
             npm audit --audit-level=high
@@ -69,7 +71,7 @@ jobs:
           fi
 
       - name: security-checklist gate (must score >= 100)
-        working-directory: ..
+        working-directory: ${{ github.workspace }}
         run: |
           score=$(bash tools/security-checklist.sh 2>/tmp/checklist.log | tail -1)
           cat /tmp/checklist.log
