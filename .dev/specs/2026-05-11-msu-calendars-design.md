@@ -27,20 +27,24 @@ Six pages on five msstate.edu subdomains. All URLs are hardcoded — no dynamic 
 
 | # | Calendar | URL | Subdomain | Parser shape |
 |---|---|---|---|---|
-| 1 | Academic Calendar | `https://www.registrar.msstate.edu/calendars/academic-calendar` | registrar | A (single-page date table) |
-| 2 | Examination Schedule | `https://www.registrar.msstate.edu/students/schedules/exam-schedule` | registrar | A |
-| 3 | University Holidays | `https://www.hrm.msstate.edu/benefits/holidays/` | hrm | A |
-| 4 | Graduate School Calendar | `https://www.grad.msstate.edu/students/graduate-school-calendar` | grad | A |
-| 5 | Financial Aid Important Dates | `https://www.sfa.msstate.edu/calendars/` (index) + `/calendars/academic-calendar/<year>/<term>` sub-pages | sfa | B (term-index + per-term date tables) |
+| 1 | University Holidays | `https://www.hrm.msstate.edu/benefits/holidays/` | hrm | A (single-page date table) |
+| 2 | Academic Calendar | `https://www.registrar.msstate.edu/calendars/academic-calendar` (index) + `/calendars/academic-calendar/<year>/<term>` sub-pages | registrar | B (term-index + per-term HTML date tables) |
+| 3 | Examination Schedule | `https://www.registrar.msstate.edu/students/schedules/exam-schedule` (index) + `/students/schedules/exam-schedule/<year>/<term>` sub-pages | registrar | B |
+| 4 | Financial Aid Important Dates | `https://www.sfa.msstate.edu/calendars/` (index) + `/calendars/academic-calendar/<year>/<term>` sub-pages | sfa | B |
+| 5 | Graduate School Calendar | `https://www.grad.msstate.edu/students/graduate-school-calendar` (index) + per-term PDF files in `/sites/.../files/<YYYY-MM>/<Term> <YYYY>.pdf` | grad | D (term-index + per-term PDFs) |
 | 6 | Housing Calendar | `https://www.housing.msstate.edu/events/` | housing | C (paginated Drupal event listing) |
+
+**2026-05-11 amendment:** The original brainstorming classified registrar academic + exam + grad school as Shape A (single-page date table). Empirical verification of the canonical URLs (after Task 2 landed) showed all three are index pages, not date tables. Reclassified: academic + exam are Shape B (same pattern as SFA, different URL prefix); grad school is a new Shape D (PDF files instead of HTML sub-pages). Only `university_holidays` is genuinely Shape A. The spec is updated; the implementation plan was revised accordingly.
 
 ### Parser shapes
 
-**Shape A — single-page date table.** One HTTP fetch per source. Page contains a table or definition-list mapping event names to dates or date ranges. Parser extracts rows directly. Sources 1–4.
+**Shape A — single-page date table.** One HTTP fetch per source. Page contains a table or definition-list mapping event names to dates or date ranges. Parser extracts rows directly. Only source: `university_holidays`.
 
-**Shape B — index + per-term sub-pages.** SFA's `/calendars/` page is a hub listing terms by academic year. Each term has its own sub-page at `/calendars/academic-calendar/<year>/<term>` (currently 21 sub-pages spanning 2 academic years). Build pipeline fetches the index, extracts term URLs, fetches each, parses the date table on each. Concurrency limit 4 with per-fetch 15s timeout.
+**Shape B — index + per-term HTML sub-pages.** Index page is a hub listing terms by academic year. Each term has its own HTML sub-page (URL pattern `…/<year>/<slug>`) containing a date table. Build pipeline fetches the index, extracts sub-page URLs from `<a href>` links matching the per-source pattern, fetches each sub-page, parses the date table on each. Concurrency limit 4 with per-fetch 15s timeout. URL patterns are per source (`/calendars/academic-calendar/<year>/<term>` on registrar.msstate.edu and sfa.msstate.edu; `/students/schedules/exam-schedule/<year>/<term>` on registrar.msstate.edu) but the index-walk + term-page logic is shared. Sources: `academic_calendar`, `exam_schedule`, `sfa_financial_aid`.
 
-**Shape C — paginated Drupal event listing.** Housing's `/events/` page renders events with title + date (or date range) + description. Build pipeline walks page 1 only (covers the current ~3-month window — events further out aren't typically published). Each event normalizes to a single row; date ranges are preserved (`start` ≠ `end` allowed).
+**Shape C — paginated Drupal event listing.** Housing's `/events/` page renders events with title + date (or date range) + description. Build pipeline walks page 1 only (covers the current ~3-month window — events further out aren't typically published). Each event normalizes to a single row; date ranges are preserved (`start` ≠ `end` allowed). Only source: `housing`.
+
+**Shape D — term-index + per-term PDF files.** Grad school's `/students/graduate-school-calendar` is an index linking to PDF files in `/sites/www.grad.msstate.edu/files/<YYYY-MM>/<Term> <YYYY>.pdf`. Build pipeline fetches the index, extracts PDF URLs from `<a href>`, fetches each PDF, runs `pdf-parse` (already a dependency for OPs), and extracts event + date rows from the parsed text. Concurrency 4 with 30s timeout per PDF. WAF detection applies to the index page; PDF fetches return binary and are validated by `pdf-parse` succeeding. Only source: `grad_school_calendar`.
 
 ## Architecture
 
@@ -51,9 +55,11 @@ Mirrors the existing policy pipeline structurally. No shared-infra refactor of `
 ```
 msstate-policies/src/calendars/
 ├── parsers/
-│   ├── date_table.ts         # Shape A — selectors per source, returns rows
-│   ├── term_index.ts         # Shape B — SFA index walk + per-term parsing
-│   └── event_list.ts         # Shape C — Housing pagination + event extraction
+│   ├── date_table.ts         # Shape A — holidays only
+│   ├── term_pages.ts         # Shape B — generalized index + per-term HTML parser
+│   │                         #          (per-source URL pattern + extractor variants)
+│   ├── event_list.ts         # Shape C — Housing pagination + event extraction
+│   └── pdf_calendar.ts       # Shape D — grad school index + PDF parsing via pdf-parse
 ├── scraper.ts                # Top-level: fetch + dispatch to the right parser
 ├── corpus.ts                 # Worker-snapshot reader; local-mode live fetch
 ├── search.ts                 # BM25 over event names + descriptions (weighted: event 3×, description 1×); ranks for chain tool
@@ -64,12 +70,15 @@ msstate-policies/src/tools/
 └── get_msu_calendar.ts       # Raw getter — by source + optional term
 
 msstate-policies/tests/fixtures/calendars/
-├── registrar_academic.html
-├── registrar_exams.html
 ├── hrm_holidays.html
-├── grad_school.html
+├── registrar_academic_index.html
+├── registrar_academic_2026_spring.html  # representative term sub-page
+├── registrar_exams_index.html
+├── registrar_exams_2026_spring.html
 ├── sfa_index.html
-├── sfa_term_2026_fall.html   # representative term sub-page
+├── sfa_term_2026_fall.html
+├── grad_index.html
+├── grad_2026_spring.pdf      # representative grad term PDF
 └── housing_events.html
 
 msstate-policies/eval/

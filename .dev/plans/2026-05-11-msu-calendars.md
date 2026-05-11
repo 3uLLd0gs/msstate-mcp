@@ -4,9 +4,39 @@
 
 **Goal:** Add two MCP tools (`find_msu_date`, `get_msu_calendar`) to the existing `msstate-policies` server that answer date-anchored questions across six MSU subdomains. Tool count grows 5 → 7.
 
-**Architecture:** Parsers per source under `msstate-policies/src/calendars/` (three shapes: single-page date table, term-index + sub-pages, paginated Drupal event list). Worker reads from a pre-built `academic_calendar` block in `worker/corpus.json`; local install live-fetches. Same security posture as policies (WAF abort, no err.message echo, hardcoded URLs, query-length cap).
+**Architecture:** Parsers per source under `msstate-policies/src/calendars/` (four shapes — see amendment below). Worker reads from a pre-built `academic_calendar` block in `worker/corpus.json`; local install live-fetches. Same security posture as policies (WAF abort, no err.message echo, hardcoded URLs, query-length cap).
 
-**Tech Stack:** TypeScript (strict), `cheerio` for HTML parsing (already a dep), `node:test` + `tsx` for tests, `esbuild` for bundling, Cloudflare Workers runtime. Spec at `.dev/specs/2026-05-11-msu-calendars-design.md`.
+**Tech Stack:** TypeScript (strict), `cheerio` for HTML parsing (already a dep), `pdf-parse` (already a dep, used for Shape D), `node:test` + `tsx` for tests, `esbuild` for bundling, Cloudflare Workers runtime. Spec at `.dev/specs/2026-05-11-msu-calendars-design.md`.
+
+---
+
+## ⚠️ 2026-05-11 PLAN AMENDMENT — read this first
+
+The original plan classified 4 of the 6 sources as **Shape A (single-page date table)**. After Task 2 landed, empirical verification of the canonical URLs showed only **`university_holidays`** is actually Shape A. The other three "Shape A" sources are index pages with different structures:
+
+- `academic_calendar` (registrar) → index → HTML per-term sub-pages → **reclassified Shape B**, same pattern as SFA
+- `exam_schedule` (registrar) → index → HTML per-term sub-pages → **reclassified Shape B**
+- `grad_school_calendar` → index → **per-term PDF files** → **new Shape D**, parses PDFs via the existing `pdf-parse` dep
+
+**Revised tasks:**
+
+| Original task | Revised content |
+|---|---|
+| **Task 2** (holidays) | ✅ DONE as-is — university_holidays is genuinely Shape A |
+| **Task 3** | Was: "3 remaining Shape A parsers". **Now: Generalized Shape B parser (term-index + per-term HTML pages) + apply to academic_calendar + exam_schedule.** Two fixtures per source (index + one term page = 4 fixtures total). |
+| **Task 4** | Was: "Shape B parser (SFA index + per-term)". **Now: Apply the generalized Shape B parser from Task 3 to SFA — mostly configuration + tests, since the parser is already written.** |
+| **NEW: Task 4b** | **Shape D parser for grad_school_calendar — index page + per-term PDF parsing.** Captures grad index HTML + one representative PDF (e.g. `Spring 2026 1.pdf`). Uses `pdf-parse` (already a dep). |
+| **Task 5** (housing) | Unchanged |
+| **Task 6** (scraper) | Update dispatcher to handle 4 shapes (A, B, C, D) instead of 3 |
+| **Tasks 7–14** | Unchanged in structure, but Tasks 8 (find_msu_date) and 12 (worker) now also need the **multi-year UX requirement** (see below) |
+
+**Multi-year UX requirement (2026-05-11):** When a user asks an ambiguous date question like *"when does spring break start?"* without specifying a year, `find_msu_date` must surface ALL year-versions of the matching event in its `matches` array so the LLM can answer with both. Concretely:
+- Default `limit` for `find_msu_date` bumps from 5 → 10.
+- Tool `description` adds an explicit rule: *"If the user's question does not specify a year/term and multiple year-versions of an event exist in the corpus, present all of them — do not pick one arbitrarily."*
+- Add a test asserting that a 2-row corpus (Spring Break 2026 + Spring Break 2027) returns ≥ 2 matches with distinct `term` values.
+- The Worker's duplicated handler (Task 12) gets the same treatment.
+
+The rest of the plan text below is the original; for Tasks 3, 4, and the new Task 4b, **the subagent dispatcher will compose fresh prompts at execution time** that reflect the amendment. Read the relevant prompt at dispatch time, not this document, for the canonical task content.
 
 ---
 
