@@ -10,6 +10,8 @@ Ask a natural-language question like *"What is MSU's hazing policy?"*. The MCP s
 
 If no MSU policy applies (*"what's the weather forecast?"*, *"the latest football score"*), Claude refuses cleanly instead of fabricating an answer.
 
+The server also covers MSU academic dates — the registrar's academic and exam calendars, university holidays, the graduate-school calendar, financial-aid important dates, and residence-life milestones. Same grounding rules apply: answers cite the source MSU page.
+
 You can ask things like:
 
 - *"What is MSU's hazing policy?"*
@@ -19,6 +21,8 @@ You can ask things like:
 - *"What's the rule on smoking on campus?"*
 - *"What's MSU's travel reimbursement policy?"*
 - *"What's MSU's faculty grievance procedure?"*
+- *"When does spring break start in spring 2026?"*
+- *"When is fall move-in?"*
 
 ## Quick Start
 
@@ -36,7 +40,7 @@ The fastest way to use this — add the MCP server as a custom **connector on cl
    - **Name:** `MSU Policies` (anything is fine)
    - **URL:** `https://msstate-policies-mcp.mminsub90.workers.dev/mcp`
 
-   Save. The connector should now show **5 tools** available.
+   Save. The connector should now show **7 tools** available.
 3. Open a new chat, enable the connector, and ask: *"What is MSU's hazing policy?"* — Claude will return a grounded answer that quotes the policy verbatim and cites OP 91.208 with a `policies.msstate.edu` URL.
 
 That's the full setup. The same connector works on Claude mobile under the same account, no separate steps.
@@ -66,7 +70,7 @@ The fastest path. Works in your browser at <https://claude.ai> and the Claude iO
 4. Fill in:
    - **Name:** `MSU Policies` (anything is fine)
    - **URL:** `https://msstate-policies-mcp.mminsub90.workers.dev/mcp`
-5. Save. The connector should now show **5 tools** available.
+5. Save. The connector should now show **7 tools** available.
 6. Open a new chat, enable the connector, and ask a policy question.
 
 Once added on web, the same connector is usable from the Claude mobile app under the same account — no separate setup.
@@ -114,7 +118,7 @@ In Claude Desktop you can also click **Settings → Developer → Edit Config** 
 
 **3. Save and fully quit the client** — don't just close the window. On macOS use Cmd+Q; on Windows right-click the tray icon and pick Quit. Reopen.
 
-**4. Verify.** Look for the tools indicator (small icon near the chat input). You should see `msstate-policies` with **5 tools**. Then try *"What is MSU's hazing policy?"* — Claude will call the chain tool and return a grounded answer with a citation.
+**4. Verify.** Look for the tools indicator (small icon near the chat input). You should see `msstate-policies` with **7 tools**. Then try *"What is MSU's hazing policy?"* — Claude will call the chain tool and return a grounded answer with a citation.
 
 The first call takes ~5 seconds (the server fetches MSU's index and the relevant PDF). Later calls reuse cached data and are faster.
 
@@ -129,7 +133,7 @@ ChatGPT Plus and Pro support custom MCP Connectors. **Requires a paid ChatGPT pl
 3. Fill in:
    - **Name:** `MSU Policies` (anything is fine)
    - **URL:** `https://msstate-policies-mcp.mminsub90.workers.dev/mcp`
-4. Save. The connector should now show **5 tools** available.
+4. Save. The connector should now show **7 tools** available.
 5. Open a new chat, enable the connector, and ask a policy question.
 
 The same connector is usable from the ChatGPT iOS / Android apps under the same account — no separate setup.
