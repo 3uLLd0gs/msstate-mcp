@@ -34,15 +34,47 @@ interface Policy {
   approvedBy: string | null;
 }
 
+interface CalendarRow {
+  source: string;
+  event: string;
+  start: string;
+  end: string;
+  time?: string;
+  term?: string;
+  description?: string;
+  source_url: string;
+  retrieved_at: string;
+}
+
+interface CalendarBlock {
+  rows: CalendarRow[];
+  per_source: Record<string, { row_count: number; error: string | null }>;
+  built_at: string;
+}
+
 interface Corpus {
   builtAt: string;
   source: string;
   indexRowCount: number;
   policies: Policy[];
+  academic_calendar?: CalendarBlock;
 }
 
 const corpus = corpusData as Corpus;
 const POLICIES: Policy[] = corpus.policies;
+
+const CAL_ROWS: CalendarRow[] = corpus.academic_calendar?.rows ?? [];
+const CAL_BUILT_AT = corpus.academic_calendar?.built_at ?? corpus.builtAt;
+const CAL_PER_SOURCE = corpus.academic_calendar?.per_source ?? {};
+
+const CAL_SOURCES = [
+  "academic_calendar",
+  "exam_schedule",
+  "university_holidays",
+  "grad_school_calendar",
+  "sfa_financial_aid",
+  "housing",
+] as const;
 
 // ---- BM25 tokenization + scoring (mirrors msstate-policies/src/search.ts) ---
 
@@ -136,6 +168,78 @@ function bm25Search(query: string, limit = 10): ScoredHit[] {
   }
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, limit);
+}
+
+// ---- Calendar BM25 (mirrors msstate-policies/src/calendars/search.ts) ------
+
+interface CalDoc {
+  row: CalendarRow;
+  eventTokens: string[];
+  descriptionTokens: string[];
+  termTokens: string[];
+  dl: number;
+}
+
+const calDocs: CalDoc[] = CAL_ROWS.map((r) => {
+  const eventTokens = tokenize(r.event);
+  const descriptionTokens = tokenize(r.description ?? "");
+  const termTokens = tokenize(r.term ?? "");
+  return {
+    row: r,
+    eventTokens,
+    descriptionTokens,
+    termTokens,
+    dl: eventTokens.length + descriptionTokens.length + termTokens.length,
+  };
+});
+const calDf = new Map<string, number>();
+let calTotalLen = 0;
+for (const d of calDocs) {
+  calTotalLen += d.dl;
+  const seen = new Set<string>();
+  for (const t of [...d.eventTokens, ...d.descriptionTokens, ...d.termTokens]) {
+    if (seen.has(t)) continue;
+    seen.add(t);
+    calDf.set(t, (calDf.get(t) ?? 0) + 1);
+  }
+}
+const calAvgLen = calDocs.length > 0 ? calTotalLen / calDocs.length : 0;
+
+function calIdf(token: string): number {
+  const n = calDocs.length;
+  const dfi = calDf.get(token) ?? 0;
+  if (dfi === 0 || n === 0) return 0;
+  return Math.log(1 + (n - dfi + 0.5) / (dfi + 0.5));
+}
+
+const CAL_FIELD_WEIGHTS = { event: 3, description: 1, term: 1 } as const;
+
+function bm25TermScoreCal(tf: number, dl: number, idfV: number): number {
+  if (tf <= 0) return 0;
+  const denom = tf + BM25_K1 * (1 - BM25_B + (BM25_B * dl) / (calAvgLen || 1));
+  return idfV * ((tf * (BM25_K1 + 1)) / denom);
+}
+
+function bm25SearchCalendars(query: string, limit = 10): { row: CalendarRow; score: number }[] {
+  const qTokens = tokenize(query);
+  if (qTokens.length === 0) return [];
+  const out: { row: CalendarRow; score: number }[] = [];
+  for (const d of calDocs) {
+    let s = 0;
+    for (const q of qTokens) {
+      const idfQ = calIdf(q);
+      if (idfQ === 0) continue;
+      const tfE = countOf(q, d.eventTokens);
+      const tfD = countOf(q, d.descriptionTokens);
+      const tfT = countOf(q, d.termTokens);
+      s += CAL_FIELD_WEIGHTS.event * bm25TermScoreCal(tfE, d.dl, idfQ);
+      s += CAL_FIELD_WEIGHTS.description * bm25TermScoreCal(tfD, d.dl, idfQ);
+      s += CAL_FIELD_WEIGHTS.term * bm25TermScoreCal(tfT, d.dl, idfQ);
+    }
+    if (s > 0) out.push({ row: d.row, score: s });
+  }
+  out.sort((a, b) => b.score - a.score);
+  return out.slice(0, limit);
 }
 
 // ---- Helpers ----------------------------------------------------------------
@@ -238,6 +342,41 @@ const TOOLS = [
     },
   },
   {
+    name: "find_msu_date",
+    description:
+      "Answer natural-language questions about Mississippi State University academic dates, financial-aid deadlines, university holidays, residence-life milestones, and graduate-school deadlines. Returns up to 10 matching calendar rows ranked by relevance, each with start/end dates, the source calendar, and the canonical msstate.edu URL. RULES for answering: (1) Use ONLY the returned rows — do not draw on outside knowledge. (2) Quote the date verbatim and cite the `source_url`. (3) If `matches` is empty or no row clearly answers the question, say so plainly and recommend the source URL or contacting the responsible MSU office. (4) Surface the row's `retrieved_at` and `corpus_built_at` so users can verify freshness. (5) IMPORTANT MULTI-YEAR HANDLING: if the user's question does NOT specify a year/term and multiple year-versions of an event exist (e.g., Spring Break 2026 and Spring Break 2027), present ALL of them year-by-year — do not pick one arbitrarily.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        q: { type: "string", description: "Natural-language MSU date question." },
+      },
+      required: ["q"],
+    },
+  },
+  {
+    name: "get_msu_calendar",
+    description:
+      "Return the raw rows for one MSU calendar source. `source` is one of: academic_calendar, exam_schedule, university_holidays, grad_school_calendar, sfa_financial_aid, housing. Optional `term` filter matches via case-insensitive substring (e.g. 'Fall 2026', '2026', 'fall').",
+    inputSchema: {
+      type: "object",
+      properties: {
+        source: {
+          type: "string",
+          enum: [
+            "academic_calendar",
+            "exam_schedule",
+            "university_holidays",
+            "grad_school_calendar",
+            "sfa_financial_aid",
+            "housing",
+          ],
+        },
+        term: { type: "string", description: "Optional term filter." },
+      },
+      required: ["source"],
+    },
+  },
+  {
     name: "health_check",
     description:
       "Inspect the Worker's corpus state. Returns counts, build timestamp, and runtime info. Visible to the LLM so it can apologize coherently if the corpus is stale or empty.",
@@ -275,6 +414,27 @@ function tooLong(name: string, value: string): McpToolResponse {
   return errorContent(
     `${name} too long: ${value.length} chars (max ${MAX_QUERY_CHARS}). Refine the query.`,
   );
+}
+
+function buildCalendarNotes(
+  matches: Array<{ event: string; term?: string }>,
+): string {
+  if (matches.length === 0) {
+    return "No MSU calendar row matched this query. Try a more specific phrasing or check the source calendar directly.";
+  }
+  const byStem = new Map<string, Set<string>>();
+  for (const m of matches) {
+    const firstWord = m.event.split(/\s+/).filter((w) => !/^(the|a|an|of|for|to|in|on|at)$/i.test(w))[0] ?? m.event;
+    const stem = firstWord.toLowerCase();
+    if (!byStem.has(stem)) byStem.set(stem, new Set());
+    if (m.term) byStem.get(stem)!.add(m.term);
+  }
+  const multiYearStems = [...byStem.entries()].filter(([, terms]) => terms.size >= 2);
+  if (multiYearStems.length > 0) {
+    const [stem, terms] = multiYearStems[0];
+    return `Multi-year matches: '${stem}' appears in ${terms.size} distinct terms (${[...terms].join(", ")}). Present each year-version separately.`;
+  }
+  return "";
 }
 
 async function callTool(name: string, args: Record<string, unknown>): Promise<McpToolResponse> {
@@ -356,15 +516,66 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Mc
       return { content: [{ type: "text", text: cite }] };
     }
 
+    case "find_msu_date": {
+      const q = String(args.q ?? "");
+      if (q.length === 0) return errorContent("q is required.");
+      if (q.length > MAX_QUERY_CHARS) return tooLong("q", q);
+      const hits = bm25SearchCalendars(q, 10);
+      const matches = hits.map((h) => ({
+        source: h.row.source,
+        event: h.row.event,
+        start: h.row.start,
+        end: h.row.end,
+        time: h.row.time,
+        term: h.row.term,
+        description: h.row.description,
+        source_url: h.row.source_url,
+        retrieved_at: h.row.retrieved_at,
+        score: Number(h.score.toFixed(6)),
+      }));
+      const notes = buildCalendarNotes(matches);
+      return jsonContent({
+        q,
+        matches,
+        notes,
+        corpus_built_at: CAL_BUILT_AT,
+      });
+    }
+
+    case "get_msu_calendar": {
+      const source = String(args.source ?? "");
+      if (!CAL_SOURCES.includes(source as (typeof CAL_SOURCES)[number])) {
+        return errorContent(
+          `Unknown source: ${source}. Must be one of: ${CAL_SOURCES.join(", ")}.`,
+        );
+      }
+      const term = args.term ? String(args.term).toLowerCase() : null;
+      if (term && term.length > 64) return errorContent("term filter too long (max 64 chars).");
+      const rows = CAL_ROWS.filter((r) => r.source === source).filter(
+        (r) => !term || (r.term ?? "").toLowerCase().includes(term),
+      );
+      const sourceUrl = rows[0]?.source_url ?? "";
+      return jsonContent({
+        source,
+        term: args.term ?? null,
+        rows,
+        source_url: sourceUrl,
+        corpus_built_at: CAL_BUILT_AT,
+      });
+    }
+
     case "health_check": {
       return jsonContent({
         runtime: "cloudflare-workers",
-        version: "0.3.0",
+        version: "0.4.0",
         index_row_count: corpus.indexRowCount,
         policies_in_corpus: POLICIES.length,
         corpus_built_at: corpus.builtAt,
         corpus_source: corpus.source,
         bm25_corpus_stats: { N, avg_doc_length: Math.round(avgLen) },
+        calendars_row_count: CAL_ROWS.length,
+        calendars_built_at: CAL_BUILT_AT,
+        calendars_per_source: CAL_PER_SOURCE,
         note: "This is the Cloudflare Workers variant. Corpus is a pre-extracted snapshot; rebuild via scripts/build-worker-corpus.mjs to refresh.",
       });
     }
@@ -401,7 +612,7 @@ async function handleRpc(req: JsonRpcRequest): Promise<JsonRpcResponse | null> {
         id,
         result: {
           protocolVersion: PROTOCOL_VERSION,
-          serverInfo: { name: "msstate-policies", version: "0.3.0" },
+          serverInfo: { name: "msstate-policies", version: "0.4.0" },
           capabilities: { tools: { listChanged: false } },
         },
       };
@@ -471,7 +682,7 @@ export default {
           JSON.stringify(
             {
               name: "msstate-policies-mcp",
-              version: "0.3.0",
+              version: "0.4.0",
               runtime: "cloudflare-workers",
               policies: POLICIES.length,
               builtAt: corpus.builtAt,
