@@ -25,37 +25,49 @@ You can ask things like:
 - *"When does spring break start in spring 2026?"*
 - *"When is fall move-in?"*
 
-## Quick Start
+## Tools
 
-The fastest way to use this — add the MCP server as a custom **connector on claude.ai** (works in your browser and the Claude mobile app).
+The hosted MCP server exposes **7 tools** that any MCP-capable client can call:
 
-**Prerequisites:**
+| Tool | What it does |
+|---|---|
+| `search_policies` | Keyword search across MSU Operating Policies; returns OP numbers + titles + snippets ranked by relevance. |
+| `get_policy` | Fetch the full text + metadata of one policy by OP number or URL. |
+| `chain_find_relevant_policies` | One-call natural-language workflow: take a question, find top-k relevant policies, return their full text for the LLM to ground its answer. |
+| `cite_policy` | Format a clean citation for an OP by number (`"OP 91.208 (Hazing)"` short, or full APA-style). |
+| `find_msu_date` *(v0.4.0+)* | One-call natural-language date lookup across six MSU calendars. Returns matching events with `start`/`end` ISO dates, the source calendar, and the canonical URL. When the question is ambiguous about year, returns **all** year-versions so the LLM can answer multi-year. |
+| `get_msu_calendar` *(v0.4.0+)* | Raw dump of one calendar source (`academic_calendar`, `exam_schedule`, `university_holidays`, `grad_school_calendar`, `sfa_financial_aid`, `housing`) with optional term filter. |
+| `health_check` | Diagnostic: per-source row counts, last build timestamp, last errors. Useful when answers feel stale or empty. |
 
-- A paid [claude.ai](https://claude.ai) plan (Pro, Team, or Enterprise — free-tier accounts can't add custom connectors). For other paths that work without a paid plan, see [Pick your client](#pick-your-client) below.
-- Any modern browser.
+## Quick Start (Claude or ChatGPT, ~30 seconds)
 
-**Three steps:**
+**The same hosted MCP endpoint works for both Claude.ai and ChatGPT Plus/Pro custom connectors.** Pick one — these are parallel flows.
 
-1. Sign in to <https://claude.ai>, then open **Settings → Connectors** (or click the connector button in the chat composer) and choose **Add custom connector**.
-2. Fill in:
-   - **Name:** `MSU Policies` (anything is fine)
-   - **URL:** `https://msstate-policies-mcp.mminsub90.workers.dev/mcp`
+| | **Claude.ai** | **ChatGPT** |
+|---|---|---|
+| **You need** | A paid Claude plan (Pro, Team, Enterprise) | A paid ChatGPT plan (Plus or Pro) |
+| **1.** | Sign in at <https://claude.ai> | Sign in at <https://chatgpt.com> |
+| **2.** | Open **Settings → Connectors → Add custom connector** | Open **Settings → Connectors → Add custom connector** |
+| **3.** | **Name:** `MSU` (anything) <br> **URL:** `https://msstate-policies-mcp.mminsub90.workers.dev/mcp` | **Name:** `MSU` (anything) <br> **URL:** `https://msstate-policies-mcp.mminsub90.workers.dev/mcp` |
+| **4.** | Save. Connector should show **7 tools** | Save. Connector should show **7 tools** |
+| **5.** | New chat, enable the connector, ask a question | New chat, enable the connector, ask a question |
 
-   Save. The connector should now show **7 tools** available.
-3. Open a new chat, enable the connector, and ask: *"What is MSU's hazing policy?"* — Claude will return a grounded answer that quotes the policy verbatim and cites OP 91.208 with a `policies.msstate.edu` URL.
+Try one of these to verify:
+- *"What is MSU's hazing policy?"* → quoted answer citing OP 91.208 with the `policies.msstate.edu` URL.
+- *"When does spring break start?"* → multi-year answer covering both 2026 and 2027 (the server returns all year-versions so the LLM doesn't have to guess which you meant).
 
-That's the full setup. The same connector works on Claude mobile under the same account, no separate steps.
+Mobile apps (Claude iOS/Android, ChatGPT iOS/Android) use the same connector under the same account — set it up once on web, mobile sees it automatically.
 
-For other clients (Claude Code, Cursor, Windsurf, Zed, Claude Desktop, ChatGPT Plus/Pro, OpenAI API for free-ChatGPT users, or the no-install starter zip for free claude.ai), keep reading.
+For local installs (Claude Code, Claude Desktop, Cursor, Windsurf, Zed) and code-based access (OpenAI API for free-ChatGPT users, no-install starter zip for free claude.ai), keep reading.
 
 ## Pick your client
 
 | If you use… | Easiest install | Time |
 |---|---|---|
 | **claude.ai** in a browser, or **Claude mobile** on iOS/Android | [Add a connector with a URL](#claudeai-web--claude-mobile) | 30 sec |
+| **ChatGPT Plus / Pro** in a browser, or **ChatGPT mobile** on iOS/Android | [Add a connector with a URL](#chatgpt-plus--pro) | 30 sec |
 | **Claude Code** (CLI) | [Two slash commands](#claude-code) | 30 sec |
 | **Claude Desktop**, **Cursor**, **Windsurf**, **Zed** | [Paste a JSON snippet](#claude-desktop-cursor-windsurf-zed) | 1 min |
-| **ChatGPT** (Plus / Pro) | [Add a connector with a URL](#chatgpt-plus--pro) | 30 sec |
 | **OpenAI API** (any ChatGPT plan, including free) | [Python sample](#openai-api) | 1 min |
 | **Free claude.ai** (no MCP support) | [Drag-and-drop a Project starter zip](#free-claudeai-no-install) | 1 min |
 
@@ -63,20 +75,20 @@ For other clients (Claude Code, Cursor, Windsurf, Zed, Claude Desktop, ChatGPT P
 
 ## claude.ai web + Claude mobile
 
-The fastest path. Works in your browser at <https://claude.ai> and the Claude iOS / Android apps. **Requires a paid claude.ai plan** to add custom connectors.
+The fastest path. Works in your browser at <https://claude.ai> and the Claude iOS / Android apps. **Requires a paid claude.ai plan** (Pro, Team, or Enterprise) to add custom connectors.
 
 1. Sign in to <https://claude.ai>.
 2. Open **Settings → Connectors** (or the connector button in the chat composer).
 3. Click **Add custom connector**.
 4. Fill in:
-   - **Name:** `MSU Policies` (anything is fine)
+   - **Name:** `MSU` (anything is fine; this is just the label that appears in the connector list)
    - **URL:** `https://msstate-policies-mcp.mminsub90.workers.dev/mcp`
 5. Save. The connector should now show **7 tools** available.
-6. Open a new chat, enable the connector, and ask a policy question.
+6. Open a new chat, enable the connector, and ask either a policy question (*"What is MSU's hazing policy?"*) or a date question (*"When does fall semester start?"*).
 
 Once added on web, the same connector is usable from the Claude mobile app under the same account — no separate setup.
 
-> **Note on freshness:** This hosted version reads from a snapshot of MSU's policies refreshed periodically (the response includes a `corpus_built_at` timestamp). For *always-fresh* data — i.e., a live scrape of MSU per request — install one of the local paths below.
+> **Note on freshness:** This hosted version reads from a periodic snapshot of MSU's policies + six calendar sources (response includes `corpus_built_at` and per-row `retrieved_at` timestamps). For *always-fresh* data — i.e., a live scrape of MSU per request — install one of the local paths below.
 
 ## Claude Code
 
@@ -119,7 +131,7 @@ In Claude Desktop you can also click **Settings → Developer → Edit Config** 
 
 **3. Save and fully quit the client** — don't just close the window. On macOS use Cmd+Q; on Windows right-click the tray icon and pick Quit. Reopen.
 
-**4. Verify.** Look for the tools indicator (small icon near the chat input). You should see `msstate-policies` with **7 tools**. Then try *"What is MSU's hazing policy?"* — Claude will call the chain tool and return a grounded answer with a citation.
+**4. Verify.** Look for the tools indicator (small icon near the chat input). You should see `msstate-policies` with **7 tools**. Try *"What is MSU's hazing policy?"* or *"When does spring break start?"* — Claude will call the right chain tool and return a grounded answer with a citation.
 
 The first call takes ~5 seconds (the server fetches MSU's index and the relevant PDF). Later calls reuse cached data and are faster.
 
@@ -132,14 +144,14 @@ ChatGPT Plus and Pro support custom MCP Connectors. **Requires a paid ChatGPT pl
 1. Sign in to <https://chatgpt.com>.
 2. Open **Settings → Connectors → Add custom connector**.
 3. Fill in:
-   - **Name:** `MSU Policies` (anything is fine)
+   - **Name:** `MSU` (anything is fine; this is just the label that appears in the connector list)
    - **URL:** `https://msstate-policies-mcp.mminsub90.workers.dev/mcp`
 4. Save. The connector should now show **7 tools** available.
-5. Open a new chat, enable the connector, and ask a policy question.
+5. Open a new chat, enable the connector, and ask either a policy question (*"What is MSU's amnesty policy?"*) or a date question (*"When is move-in for fall 2026?"*).
 
 The same connector is usable from the ChatGPT iOS / Android apps under the same account — no separate setup.
 
-> **Note on freshness:** Same as the claude.ai path — this hosted version reads from a snapshot of MSU's policies refreshed periodically (the response includes a `corpus_built_at` timestamp). For *always-fresh* data, install one of the local paths above.
+> **Note on freshness:** Same as the claude.ai path — this hosted version reads from a periodic snapshot of MSU's policies + six calendar sources. The response includes `corpus_built_at` and per-row `retrieved_at` timestamps so the model can surface staleness. For *always-fresh* data, install one of the local paths above.
 
 ## OpenAI API
 
@@ -157,12 +169,15 @@ export OPENAI_API_KEY=sk-...
 ```python
 from openai import OpenAI
 
-INSTRUCTIONS = """You answer questions about Mississippi State University Operating Policies using the msstate-policies MCP server.
+INSTRUCTIONS = """You answer questions about Mississippi State University using the msstate-policies MCP server, which covers:
+  - MSU Operating Policies (via chain_find_relevant_policies / search_policies / get_policy / cite_policy)
+  - MSU academic dates from six calendars: academic, exam, holidays, grad school, financial aid, housing (via find_msu_date / get_msu_calendar)
 
 Rules:
-1. When calling chain_find_relevant_policies, always pass k=5 (the maximum) so the model sees a wider candidate set.
-2. If the question is not about MSU policies (e.g., weather, sports scores, news, current events, individuals' personal info), refuse plainly: state that this server only covers Mississippi State University Operating Policies and suggest contacting an appropriate alternative source. Do not invent a policy or speculate.
-3. Quote verbatim from policy text and cite the OP number + canonical URL for any normative claim."""
+1. For policy questions, call chain_find_relevant_policies with k=5 (the maximum) so the model sees a wider candidate set.
+2. For date / deadline / event questions, call find_msu_date. If the user does NOT specify a year, present ALL year-versions returned (e.g., 'Spring Break 2026 begins March 9; Spring Break 2027 begins March 8').
+3. If the question is not about MSU policies or dates (e.g., weather, sports scores, news, current events, individuals' personal info), refuse plainly and suggest contacting an appropriate alternative source. Do not invent a policy or date.
+4. Quote dates verbatim and cite the `source_url`. Quote policy text verbatim and cite the OP number + canonical URL."""
 
 client = OpenAI()
 resp = client.responses.create(
@@ -174,7 +189,7 @@ resp = client.responses.create(
         "server_url": "https://msstate-policies-mcp.mminsub90.workers.dev/mcp",
         "require_approval": "never",
     }],
-    input="What is MSU's hazing policy?",
+    input="What is MSU's hazing policy?",  # or: "When does spring break start in spring 2026?"
 )
 
 for item in resp.output:
