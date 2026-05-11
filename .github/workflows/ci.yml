@@ -13,11 +13,11 @@ jobs:
       run:
         working-directory: msstate-policies
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
           cache-dependency-path: msstate-policies/package-lock.json
 
@@ -30,18 +30,29 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: dist/ must be in sync with src/
-        run: git diff --exit-code dist/
+      - name: dist/ must be in sync with src/ (body only — banner line 2 is non-deterministic)
+        run: |
+          # Line 2 of dist/index.js is a banner: "// msstate-policies-mcp <ver> <sha> built <iso>".
+          # The <sha> + <iso> are non-deterministic between the local pre-publish build and the
+          # CI rebuild. Compare every other line — if the bundle body diverged from the committed
+          # one, the maintainer forgot to rebuild after editing src/.
+          if ! diff -q <(sed '2d' dist/index.js) <(git show HEAD:msstate-policies/dist/index.js | sed '2d') > /dev/null; then
+            echo "ERROR: dist/index.js body differs from src/ — run 'cd msstate-policies && npm run build', then commit"
+            diff <(sed '2d' dist/index.js) <(git show HEAD:msstate-policies/dist/index.js | sed '2d') | head -40
+            exit 1
+          fi
+          # embeddings.json has no banner; strict diff is fine.
+          git diff --exit-code -- dist/embeddings.json
 
       - name: Test
         run: npm test
 
-      - name: tools/list smoke test (must list exactly 5 tools)
+      - name: tools/list smoke test (must list exactly 7 tools — 4 policy + 2 calendar + 1 health)
         run: |
           PAYLOAD='{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
           COUNT=$(printf '%s\n' "$PAYLOAD" | node dist/index.js | head -n1 | jq -r '.result.tools | length')
           echo "tool count = $COUNT"
-          test "$COUNT" = "5"
+          test "$COUNT" = "7"
 
       # N6: gate every push/PR on the mechanical security checklist + npm audit
       # so regressions surface in CI rather than at the next manual release.
