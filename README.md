@@ -1,14 +1,17 @@
 # msstate-mcp
 
-**Ask Claude about Mississippi State University Operating Policies — get answers grounded in the official policy PDFs, with citations.**
+**Ask Claude about Mississippi State University — Operating Policies *and* academic dates. Answers are grounded in the official MSU pages and PDFs, with citations.**
 
-> ⚠️ **Unofficial.** This project is not affiliated with, endorsed by, or sponsored by Mississippi State University. It retrieves policy text from the public website at <https://www.policies.msstate.edu/current> for use by an LLM. **Always verify against the official source before acting on the result.**
+> ⚠️ **Unofficial.** This project is not affiliated with, endorsed by, or sponsored by Mississippi State University. It retrieves content from public MSU pages — <https://www.policies.msstate.edu/current> plus six named calendar sources on `*.msstate.edu` subdomains — for use by an LLM. **Always verify against the official source before acting on the result.**
 
 ## What this does
 
-Ask a natural-language question like *"What is MSU's hazing policy?"*. The MCP server fetches the official policy PDF, hands the full text to Claude, and Claude answers using **only** that text — quoting verbatim and citing the OP number, the canonical URL on `policies.msstate.edu`, and a retrieval timestamp.
+Ask a natural-language question and get a grounded answer that quotes verbatim from the official MSU source and cites the canonical URL. Two coverage areas, one connector:
 
-If no MSU policy applies (*"what's the weather forecast?"*, *"the latest football score"*), Claude refuses cleanly instead of fabricating an answer.
+- **Policies** — *"What is MSU's hazing policy?"* The server fetches the official policy PDF and Claude answers using only that text, citing the OP number and canonical `policies.msstate.edu` URL.
+- **Dates & deadlines** — *"When does spring break start in spring 2026?"* The server scrapes six MSU calendar sources (registrar academic + exam calendars, university holidays, graduate school, financial aid, housing) and Claude answers with the verbatim date plus the source page URL. When a question is ambiguous about year (e.g., *"when does spring break start?"*), the server returns all year-versions so Claude can present each one — *"Spring Break 2026 begins March 9. Spring Break 2027 begins March 8."*
+
+If neither a policy nor a calendar entry applies (*"what's the weather forecast?"*, *"the latest football score"*), Claude refuses cleanly instead of fabricating an answer.
 
 You can ask things like:
 
@@ -19,6 +22,8 @@ You can ask things like:
 - *"What's the rule on smoking on campus?"*
 - *"What's MSU's travel reimbursement policy?"*
 - *"What's MSU's faculty grievance procedure?"*
+- *"When does spring break start in spring 2026?"*
+- *"When is fall move-in?"*
 
 ## Quick Start
 
@@ -36,7 +41,7 @@ The fastest way to use this — add the MCP server as a custom **connector on cl
    - **Name:** `MSU Policies` (anything is fine)
    - **URL:** `https://msstate-policies-mcp.mminsub90.workers.dev/mcp`
 
-   Save. The connector should now show **5 tools** available.
+   Save. The connector should now show **7 tools** available.
 3. Open a new chat, enable the connector, and ask: *"What is MSU's hazing policy?"* — Claude will return a grounded answer that quotes the policy verbatim and cites OP 91.208 with a `policies.msstate.edu` URL.
 
 That's the full setup. The same connector works on Claude mobile under the same account, no separate steps.
@@ -66,7 +71,7 @@ The fastest path. Works in your browser at <https://claude.ai> and the Claude iO
 4. Fill in:
    - **Name:** `MSU Policies` (anything is fine)
    - **URL:** `https://msstate-policies-mcp.mminsub90.workers.dev/mcp`
-5. Save. The connector should now show **5 tools** available.
+5. Save. The connector should now show **7 tools** available.
 6. Open a new chat, enable the connector, and ask a policy question.
 
 Once added on web, the same connector is usable from the Claude mobile app under the same account — no separate setup.
@@ -114,7 +119,7 @@ In Claude Desktop you can also click **Settings → Developer → Edit Config** 
 
 **3. Save and fully quit the client** — don't just close the window. On macOS use Cmd+Q; on Windows right-click the tray icon and pick Quit. Reopen.
 
-**4. Verify.** Look for the tools indicator (small icon near the chat input). You should see `msstate-policies` with **5 tools**. Then try *"What is MSU's hazing policy?"* — Claude will call the chain tool and return a grounded answer with a citation.
+**4. Verify.** Look for the tools indicator (small icon near the chat input). You should see `msstate-policies` with **7 tools**. Then try *"What is MSU's hazing policy?"* — Claude will call the chain tool and return a grounded answer with a citation.
 
 The first call takes ~5 seconds (the server fetches MSU's index and the relevant PDF). Later calls reuse cached data and are faster.
 
@@ -129,7 +134,7 @@ ChatGPT Plus and Pro support custom MCP Connectors. **Requires a paid ChatGPT pl
 3. Fill in:
    - **Name:** `MSU Policies` (anything is fine)
    - **URL:** `https://msstate-policies-mcp.mminsub90.workers.dev/mcp`
-4. Save. The connector should now show **5 tools** available.
+4. Save. The connector should now show **7 tools** available.
 5. Open a new chat, enable the connector, and ask a policy question.
 
 The same connector is usable from the ChatGPT iOS / Android apps under the same account — no separate setup.
@@ -189,7 +194,7 @@ python examples/openai_api_sample.py "What's MSU's policy on academic amnesty?"
 
 ## Free claude.ai (no install)
 
-If you can't install MCP servers (e.g. you're on a free claude.ai plan), there's still a path: a curated **starter zip** with 22 high-traffic policy PDFs and a system-prompt template that pushes Claude toward verbatim quoting.
+If you can't install MCP servers (e.g. you're on a free claude.ai plan), there's still a path: a curated **starter zip** with 22 high-traffic policy PDFs and a system-prompt template that pushes Claude toward verbatim quoting. (Policies only — calendar coverage requires the live MCP/connector path because dates change too often for a static drop.)
 
 1. Download `msstate-policies-starter.zip` from the [latest GitHub release](https://github.com/mminsub11/msstate-mcp/releases/latest).
 2. Sign in to <https://claude.ai>.
@@ -213,7 +218,7 @@ Ask Claude *"What is MSU's hazing policy?"* and you'll see something like:
 >
 > **Source:** OP 91.208 at <https://www.policies.msstate.edu/policy/91208> (retrieved 2026-05-08).
 
-Every response includes:
+Every policy response includes:
 
 - The **OP number** for citation (e.g. `91.208`)
 - The **canonical URL** on `policies.msstate.edu` — click through to verify
@@ -221,13 +226,32 @@ Every response includes:
 - Direct quotes for binding language; no paraphrasing of normative text
 - Refusal + redirect when no MSU policy applies
 
+For a date question like *"When does spring break start?"*, you'll see something like:
+
+> MSU has a few terms with a spring break on file:
+>
+> - **Spring 2026 — Spring Break** runs **2026-03-09** through **2026-03-13**.
+> - **Spring 2027 — Spring Break** runs **2027-03-08** through **2027-03-12**.
+>
+> **Source:** Academic Calendar at <https://www.registrar.msstate.edu/calendars/academic-calendar/2026/spring> (snapshot built 2026-05-11).
+
+Every calendar response includes:
+
+- The **event name** and **start/end** ISO dates (YYYY-MM-DD)
+- A **term** label when applicable (e.g. "Spring 2026")
+- The **source calendar** id (`academic_calendar`, `exam_schedule`, `university_holidays`, `grad_school_calendar`, `sfa_financial_aid`, `housing`)
+- The **canonical URL** of the specific MSU page or PDF
+- A **`retrieved_at`** timestamp + a **`corpus_built_at`** stamp on the hosted (connector) path so you can detect staleness
+- All matching year-versions when the question doesn't pin a specific year
+
 ## Tips for getting good answers
 
 - **Ask plainly.** *"Can my RA write me up for lighting a candle in my dorm?"* works as well as *"What is the Code of Student Conduct?"*. The retrieval handles weak-keyword conceptual phrasing.
 - **Multi-part questions are fine.** Claude can cite multiple OPs in one answer (e.g., *"my professor cancelled three weeks of class — am I supposed to keep showing up?"* will surface both attendance and instructor-responsibility policies).
 - **Ask Claude to quote.** If you want to be sure the wording is verbatim from the policy, ask: *"Quote the actual policy language for the hazing definition."* The tool design encourages verbatim quoting, but a direct prompt makes it explicit.
-- **Verify the citation.** Click through the canonical URL in any answer — that's the official MSU PDF.
-- **If an answer feels off,** ask Claude to call `health_check`. If the corpus is broken or stale, that tool surfaces the failure mode honestly instead of fabricating.
+- **Verify the citation.** Click through the canonical URL in any answer — that's the official MSU PDF or calendar page.
+- **For dates, name the year if you know it.** *"Spring break in spring 2026"* gets a direct answer; *"spring break"* alone gets all available year-versions so you can compare.
+- **If an answer feels off,** ask Claude to call `health_check`. If the corpus is broken or stale, that tool surfaces the failure mode honestly (per-source row counts + last errors) instead of fabricating.
 
 ## Privacy
 
@@ -260,7 +284,7 @@ Most users don't need to set anything. If you want to tune the local install:
 
 ## Eval
 
-The current release is validated against a 50-question hand-written eval set:
+**Policies** are validated against a 50-question hand-written eval set:
 
 | | |
 |---|---:|
@@ -270,7 +294,11 @@ The current release is validated against a 50-question hand-written eval set:
 
 Judge: Claude Sonnet 4.6, k=5, BM25-only retrieval. The single missing case is *"tornado warning during my class"* — the relevant OP points at MSU's external Campus Emergency Management Plan, which is outside this server's corpus. Treat 86/88 as the realistic ceiling for the OP-only corpus.
 
-Full eval JSON: [`msstate-policies/eval/eval-2026-05-08-k5-sonnet-4-6.json`](msstate-policies/eval/eval-2026-05-08-k5-sonnet-4-6.json).
+Full policies eval JSON: [`msstate-policies/eval/eval-2026-05-08-k5-sonnet-4-6.json`](msstate-policies/eval/eval-2026-05-08-k5-sonnet-4-6.json).
+
+**Calendars** are validated against a 16-question hand-written eval set spanning all 6 sources (registrar academic + exam, university holidays, graduate school PDFs, financial aid, housing) plus one refusal case. Two questions are tagged `corpus-miss` because MSU has not yet published the relevant Fall 2026 sub-pages at the time of corpus build — these document the expected refusal behavior rather than a defect.
+
+Full calendars eval JSON: [`msstate-policies/eval/eval-calendars-2026-05-11.json`](msstate-policies/eval/eval-calendars-2026-05-11.json).
 
 ## License
 

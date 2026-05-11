@@ -97,6 +97,50 @@ function absolutize(href) {
   return `${BASE}/${href}`;
 }
 
+async function scrapeCalendarsViaSubprocess() {
+  const { execFileSync } = await import("node:child_process");
+  console.error("[build-worker-corpus] scraping calendars (6 sources)...");
+  const out = execFileSync(
+    "npx",
+    ["--yes", "tsx", "scripts/_scrape-calendars.ts"],
+    {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "inherit"],
+      maxBuffer: 8 * 1024 * 1024,
+    },
+  );
+  const payload = JSON.parse(out.toString("utf8"));
+  if (!payload || !Array.isArray(payload.rows)) {
+    throw new Error(
+      "calendar scrape: malformed payload — refusing to ship a poisoned calendar corpus",
+    );
+  }
+  if (payload.rows.length === 0) {
+    throw new Error(
+      "calendar scrape returned 0 rows — refusing to ship a poisoned calendar corpus",
+    );
+  }
+  for (const [source, info] of Object.entries(payload.per_source)) {
+    if (info.error) {
+      throw new Error(
+        `calendar scrape: ${source} failed with: ${info.error} — refusing to ship a poisoned calendar corpus`,
+      );
+    }
+    if (info.row_count === 0) {
+      throw new Error(
+        `calendar scrape: ${source} returned 0 rows — refusing to ship a poisoned calendar corpus`,
+      );
+    }
+  }
+  console.error(
+    `[build-worker-corpus]   total calendar rows: ${payload.rows.length}`,
+  );
+  for (const [source, info] of Object.entries(payload.per_source)) {
+    console.error(`[build-worker-corpus]   ${source}: ${info.row_count}`);
+  }
+  return payload;
+}
+
 async function main() {
   console.error("build-worker-corpus: fetching index...");
   const html = await fetchText(`${BASE}/current`);
@@ -175,12 +219,21 @@ async function main() {
   const outDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "worker");
   mkdirSync(outDir, { recursive: true });
   const outPath = resolve(outDir, "corpus.json");
+  const builtAt = new Date().toISOString();
   const out = {
-    builtAt: new Date().toISOString(),
+    builtAt,
     source: `${BASE}/current`,
     indexRowCount: rows.length,
     policies,
   };
+
+  const calendarPayload = await scrapeCalendarsViaSubprocess();
+  out.academic_calendar = {
+    rows: calendarPayload.rows,
+    per_source: calendarPayload.per_source,
+    built_at: builtAt,
+  };
+
   writeFileSync(outPath, JSON.stringify(out));
   const bytes = JSON.stringify(out).length;
   console.error(

@@ -167,6 +167,23 @@ The corpus rule still holds: text comes only from `policies.msstate.edu`. Just s
 - No disk cache — Workers have no filesystem. In-memory only (per-isolate).
 - No `health_check.last_index_error` — there's no scrape at request time. `health_check` reports `corpus_built_at` instead.
 
+### Calendar tools (v0.4.0, 2026-05-11)
+
+Two tools (`find_msu_date`, `get_msu_calendar`) cover six msstate.edu calendar sources via four parser shapes:
+
+- **Shape A** (single-page date table): HRM university holidays. One fetch per source.
+- **Shape B** (term-index + per-term HTML sub-pages): registrar academic calendar, registrar exam schedule, SFA financial aid. Index lists ~10â25 sub-pages per source; bounded concurrency 4 with 15s per-fetch timeout.
+- **Shape C** (paginated Drupal event list): housing. Page 1 only.
+- **Shape D** (term-index + per-term PDF files): graduate school. Per-term PDFs parsed via the existing `pdf-parse` dependency. Concurrency 4 with 30s per-PDF timeout.
+
+The original brainstorm misclassified 3 of these as Shape A; the amendment in [`.dev/specs/2026-05-11-msu-calendars-design.md`](../.dev/specs/2026-05-11-msu-calendars-design.md) captures the reclassification.
+
+Worker reads from `worker/corpus.json`'s `academic_calendar` block; local install live-scrapes with TTL cache (6h housing, 24h others). WAF detection mirrors the policy build â any challenge aborts the calendar block of the build (the build script refuses to ship a poisoned calendar corpus).
+
+Corpus rule addendum in [`CLAUDE.md`](../CLAUDE.md#corpus-extension-2026-05-11--academic-dates) lists all six URL bases; `tools/security-checklist.sh` enforces (CAL1-4) that calendar URLs are hardcoded, calendar code never touches non-msstate.edu hosts, the Worker caps `find_msu_date` query length, and the build aborts on WAF/empty.
+
+Tool count: 5 â 7. Eval set at [`msstate-policies/eval/eval-calendars-2026-05-11.json`](../msstate-policies/eval/eval-calendars-2026-05-11.json) (16 questions, mixed across the 6 sources + 1 refusal case).
+
 ## Decision log (chronological)
 
 ### Plan revisions (v1 → v7, all in git history)
