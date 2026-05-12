@@ -187,6 +187,11 @@ export async function scrapeAllCourses(opts: ScrapeAllOptions = {}): Promise<Scr
   }
 
   const codes = Array.from(allCodes);
+  if (codes.length === 0) {
+    throw new Error(
+      "zero course codes extracted across all dept pages — refusing to ship a poisoned course corpus",
+    );
+  }
   const fetched = await pool(codes, CONCURRENCY, async (code) => {
     try {
       return { code, course: await fetchCourseDetail(code), error: null as string | null };
@@ -220,6 +225,11 @@ export async function scrapeAllCourses(opts: ScrapeAllOptions = {}): Promise<Scr
     }
   }
 
+  // Defense-in-depth: if a future refactor inverts the DAG-build loop and
+  // forgets to populate reverse_dag, this aborts before the corpus ships.
+  // Currently unreachable because every forward_dag entry has length ≥ 1
+  // (only set when prereqCodes.length > 0), which guarantees at least one
+  // reverse_dag insertion. Do not remove without re-verifying that invariant.
   if (Object.keys(forward_dag).length > 0 && Object.keys(reverse_dag).length === 0) {
     throw new Error("reverse_dag empty while forward_dag non-empty — refusing to ship a poisoned course corpus");
   }
