@@ -173,3 +173,43 @@ test("find_msu_date: skips fallback when academic_calendar already dominates res
   const fallbackRows = payload.matches.filter((m: { fallback?: boolean }) => m.fallback);
   assert.equal(fallbackRows.length, 0, "no fallback when non-academic source already covers the term");
 });
+
+test("find_msu_date: response does not leak contentHash field", async () => {
+  indexCalendarRows([
+    {
+      source: "academic_calendar",
+      event: "Classes begin",
+      start: "2026-01-13",
+      end: "2026-01-13",
+      term: "Spring 2026",
+      source_url: "https://www.registrar.msstate.edu/calendars/academic-calendar/2026/spring",
+      retrieved_at: "2026-05-12T00:00:00Z",
+      citation: "[Classes begin, Spring 2026](https://www.registrar.msstate.edu/calendars/academic-calendar/2026/spring)",
+      contentHash: "deadbeef".repeat(8),
+      synonyms: ["semester starts"],
+    },
+  ]);
+  const res = await find_msu_date.handler({ q: "classes" });
+  const payload = JSON.parse(res.content[0].text);
+  for (const m of payload.matches) {
+    assert.equal(m.contentHash, undefined, "contentHash must not appear in response");
+  }
+});
+
+test("find_msu_date: notes mentions BM25 mode", async () => {
+  indexCalendarRows([
+    {
+      source: "academic_calendar",
+      event: "Classes begin",
+      start: "2026-01-13",
+      end: "2026-01-13",
+      term: "Spring 2026",
+      source_url: "https://www.registrar.msstate.edu/calendars/academic-calendar/2026/spring",
+      retrieved_at: "2026-05-12T00:00:00Z",
+      citation: "[Classes begin, Spring 2026](https://www.registrar.msstate.edu/calendars/academic-calendar/2026/spring)",
+    },
+  ]);
+  const res = await find_msu_date.handler({ q: "classes" });
+  const payload = JSON.parse(res.content[0].text);
+  assert.match(payload.notes, /BM25 with synonyms/);
+});

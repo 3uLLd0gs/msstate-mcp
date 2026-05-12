@@ -6,7 +6,11 @@
  *
  * Worker mode: doesn't run this — Worker imports rows from corpus.json.
  */
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { log } from "../log.js";
+import { contentHash } from "./hash.js";
 import {
   CALENDAR_SOURCES,
   type CalendarRow,
@@ -33,7 +37,45 @@ export async function loadAllCalendarRows(): Promise<CalendarRow[]> {
     const result = await loadCalendarSource(source);
     all.push(...result.rows);
   }
-  return all;
+  const rows = all;
+
+  // v0.5.0: attach contentHash + synonyms.
+  for (const r of rows) r.contentHash = contentHash(r);
+
+  // Path differs between source-mode (tests; from src/calendars/) and
+  // bundled-mode (dist/index.js). Try both.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    join(here, "calendar-synonyms.json"),                          // bundled
+    join(here, "..", "..", "dist", "calendar-synonyms.json"),      // source
+  ];
+  let synMap: Record<string, string[]> = {};
+  for (const p of candidates) {
+    try {
+      const sidecar = JSON.parse(readFileSync(p, "utf8")) as {
+        synonyms: Record<string, string[]>;
+      };
+      synMap = sidecar.synonyms;
+      log("info", "loaded calendar synonyms sidecar", { path: p, entries: Object.keys(synMap).length });
+      break;
+    } catch (err) {
+      if (!(err instanceof Error && "code" in err && (err as { code: string }).code === "ENOENT")) {
+        log("warn", "synonyms sidecar parse failed", {
+          path: p,
+          err_class: err instanceof Error ? err.constructor.name : "unknown",
+        });
+      }
+    }
+  }
+  if (Object.keys(synMap).length === 0) {
+    log("warn", "no calendar synonyms sidecar found; BM25 will run without synonyms field");
+  }
+
+  for (const r of rows) {
+    r.synonyms = synMap[r.contentHash ?? ""] ?? [];
+  }
+
+  return rows;
 }
 
 export async function loadCalendarSource(source: CalendarSource): Promise<ScrapeResult> {

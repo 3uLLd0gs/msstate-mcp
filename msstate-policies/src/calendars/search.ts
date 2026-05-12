@@ -3,6 +3,7 @@
  *
  * Fields indexed (weighted):
  *   event       — weight 3 (most semantic)
+ *   synonyms    — weight 2 (LLM-generated paraphrases of event title)
  *   description — weight 1
  *   term        — weight 1
  *
@@ -23,12 +24,13 @@ function tokenize(input: string): string[] {
 interface IndexedDoc {
   row: CalendarRow;
   eventTokens: string[];
+  synonymsTokens: string[];
   descriptionTokens: string[];
   termTokens: string[];
   dl: number;
 }
 
-const FIELD_WEIGHTS = { event: 3, description: 1, term: 1 } as const;
+const FIELD_WEIGHTS = { event: 3, synonyms: 2, term: 1, description: 1 } as const;
 const BM25_K1 = 1.2;
 const BM25_B = 0.75;
 
@@ -39,14 +41,17 @@ let avgLen = 0;
 export function indexCalendarRows(rows: CalendarRow[]): void {
   docs = rows.map((r) => {
     const eventTokens = tokenize(r.event);
+    const synonymsText = (r.synonyms ?? []).join(" ");
+    const synonymsTokens = tokenize(synonymsText);
     const descriptionTokens = tokenize(r.description ?? "");
     const termTokens = tokenize(r.term ?? "");
     return {
       row: r,
       eventTokens,
+      synonymsTokens,
       descriptionTokens,
       termTokens,
-      dl: eventTokens.length + descriptionTokens.length + termTokens.length,
+      dl: eventTokens.length + synonymsTokens.length + descriptionTokens.length + termTokens.length,
     };
   });
   df = new Map();
@@ -54,7 +59,7 @@ export function indexCalendarRows(rows: CalendarRow[]): void {
   for (const d of docs) {
     total += d.dl;
     const seen = new Set<string>();
-    for (const t of [...d.eventTokens, ...d.descriptionTokens, ...d.termTokens]) {
+    for (const t of [...d.eventTokens, ...d.synonymsTokens, ...d.descriptionTokens, ...d.termTokens]) {
       if (seen.has(t)) continue;
       seen.add(t);
       df.set(t, (df.get(t) ?? 0) + 1);
@@ -97,6 +102,7 @@ export function searchCalendarRows(query: string, limit = 10): CalendarHit[] {
       const idfQ = idf(q);
       if (idfQ === 0) continue;
       s += FIELD_WEIGHTS.event * bm25Term(countOf(q, d.eventTokens), d.dl, idfQ);
+      s += FIELD_WEIGHTS.synonyms * bm25Term(countOf(q, d.synonymsTokens), d.dl, idfQ);
       s += FIELD_WEIGHTS.description * bm25Term(countOf(q, d.descriptionTokens), d.dl, idfQ);
       s += FIELD_WEIGHTS.term * bm25Term(countOf(q, d.termTokens), d.dl, idfQ);
     }

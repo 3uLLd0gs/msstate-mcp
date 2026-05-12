@@ -55,6 +55,15 @@ These are known limitations, not vulnerabilities:
 - The published npm package commits `dist/index.js` and `dist/embeddings.json` — bundled artifacts that the plugin path depends on. These are reproducible from `src/` via `npm run build` (CI verifies via `git diff --exit-code dist/`), but they're not signed. If you need verified provenance, prefer the `npm publish --provenance` path documented in [`docs/BUILD.md`](docs/BUILD.md).
 - Issues in `policies.msstate.edu` itself (MSU's site) are out of scope here. Report those to MSU directly.
 
+## Build-time egress (v0.5.0)
+
+The corpus rebuild step (`scripts/build-worker-corpus.mjs`) transits each calendar row's `event` title (and optionally `term`) to `https://api.anthropic.com/v1/messages` for synonym generation. Properties:
+
+- **Event text only.** No PII; these are public MSU calendar entries.
+- **Vendor:** Anthropic. Their stated policy is no training on API inputs.
+- **Key compromise scope.** A leaked `ANTHROPIC_API_KEY` can only spend the operator's Anthropic quota. Cannot read the corpus, cannot pivot to MSU, cannot impersonate the tool at runtime. Rotation: change the env var, re-run build.
+- **Zero runtime egress.** Production deployments (Worker, npm) make **no third-party API calls** to serve queries. SYN4 in the security checklist enforces this via grep — `api.anthropic.com` must never appear in `msstate-policies/src/` or `worker/src/`.
+
 ## Out of scope: client-side circumvention
 
 Several abuse classes that come up in MCP threat-modelling are **explicitly outside this server's threat model**, because the trust principal is the user / their LLM / their machine — not us. The maintainer disclaims responsibility for the following:

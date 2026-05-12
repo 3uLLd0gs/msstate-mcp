@@ -69,6 +69,17 @@ export interface CalendarRow {
   /** Set to true by `find_msu_date` when this row was appended via the smart-fallback
    *  path. Never set at parse/scrape time; never serialized into worker/corpus.json. */
   fallback?: boolean;
+  /** SHA-256 hex of `${event}|${term??""}|${description??""}`. Computed at
+   *  build time (build-worker-corpus.mjs) or live-scrape time (corpus.ts)
+   *  and used to look up the row's embedding vector. Stripped from
+   *  find_msu_date JSON-RPC responses to keep the wire shape stable. */
+  contentHash?: string;
+  /** ~5 LLM-generated paraphrases of the event title. Baked at build time
+   *  via Anthropic Haiku for keyword-based semantic expansion. Empty array
+   *  for rows that haven't been paraphrased yet (e.g., live-scraped rows
+   *  on the stdio plugin whose hash isn't in the sidecar). Stripped from
+   *  find_msu_date JSON-RPC responses — see SYN6 security check. */
+  synonyms?: string[];
 }
 
 /** Result of scraping a single source. */
