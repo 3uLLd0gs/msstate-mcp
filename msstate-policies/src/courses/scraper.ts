@@ -84,9 +84,11 @@ export function isAllowedCatalogUrl(url: string): boolean {
 
 const UA = "msstate-policies-mcp/0.6.0 (build-worker-corpus)";
 const FETCH_TIMEOUT_MS = 15_000;
-const CONCURRENCY = 4;
+const CONCURRENCY = 2;
 const JITTER_MIN_MS = 200;
 const JITTER_MAX_MS = 600;
+const FETCH_RETRIES = 3;
+const RETRY_BACKOFF_MS = [500, 1500, 4000];
 
 let injectedFetch: typeof fetch | null = null;
 export async function withFetchInjected<T>(f: typeof fetch, fn: () => Promise<T>): Promise<T> {
@@ -98,7 +100,7 @@ export async function withFetchInjected<T>(f: typeof fetch, fn: () => Promise<T>
   }
 }
 
-async function getJson(url: string): Promise<string> {
+async function getJsonOnce(url: string): Promise<string> {
   const f = injectedFetch ?? fetch;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
@@ -111,6 +113,27 @@ async function getJson(url: string): Promise<string> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// Retry on transient network/HTTP errors. WAF challenges and 4xx are not
+// transient and shouldn't be retried — they signal upstream blocking or a
+// bad URL. 5xx and AbortError (timeout) get retries with exponential backoff.
+async function getJson(url: string): Promise<string> {
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt <= FETCH_RETRIES; attempt++) {
+    try {
+      return await getJsonOnce(url);
+    } catch (err) {
+      lastErr = err;
+      if (err instanceof CatalogWafError) throw err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/HTTP\s+4\d{2}/.test(msg)) throw err;
+      if (attempt < FETCH_RETRIES) {
+        await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS[attempt]));
+      }
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
 }
 
 function jitter(): Promise<void> {
