@@ -45,3 +45,20 @@ test("parseTermPage: academic_calendar single-day events still have start == end
     assert.equal(r.start, r.end);
   }
 });
+
+test("parseTermPage: academic_calendar handles cross-month ranges", () => {
+  const rows = parseTermPage(
+    fixture("registrar_academic_2026_spring.html"),
+    "academic_calendar",
+    {
+      url: "https://www.registrar.msstate.edu/calendars/academic-calendar/2026/spring",
+      year: 2026,
+      term: "Spring",
+    },
+  );
+  const gradApp = rows.find(
+    (r) => /apply.*graduation|graduation.*apply|early bird/i.test(r.event) && r.start === "2026-01-28",
+  );
+  assert.ok(gradApp, "expected a Jan-28-start graduation-application window");
+  assert.equal(gradApp!.end, "2026-03-27");
+});
