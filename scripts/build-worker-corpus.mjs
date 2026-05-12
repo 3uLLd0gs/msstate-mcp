@@ -230,6 +230,58 @@ function absolutize(href) {
   return `${BASE}/${href}`;
 }
 
+async function scrapeCatalogViaSubprocess() {
+  const { execFileSync } = await import("node:child_process");
+  console.error("[build-worker-corpus] scraping course catalog...");
+  let raw;
+  try {
+    raw = execFileSync(
+      "npx",
+      ["--yes", "tsx", "scripts/_scrape-catalog.ts"],
+      {
+        cwd: process.cwd(),
+        stdio: ["ignore", "pipe", "inherit"],
+        maxBuffer: 64 * 1024 * 1024,
+      },
+    );
+  } catch (err) {
+    throw new Error(
+      `course scrape subprocess failed (${err.message ?? err}) — refusing to ship a poisoned course corpus`,
+    );
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw.toString("utf8"));
+  } catch {
+    throw new Error(
+      "course scrape subprocess produced unparseable JSON — refusing to ship a poisoned course corpus",
+    );
+  }
+  if (!parsed || typeof parsed !== "object" || !parsed.records) {
+    throw new Error(
+      "course scrape subprocess returned malformed result — refusing to ship a poisoned course corpus",
+    );
+  }
+  const recordCount = Object.keys(parsed.records).length;
+  if (recordCount < 500) {
+    throw new Error(
+      `only ${recordCount} courses scraped (< 500) — refusing to ship a poisoned course corpus`,
+    );
+  }
+  if (
+    Object.keys(parsed.forward_dag).length > 0 &&
+    Object.keys(parsed.reverse_dag).length === 0
+  ) {
+    throw new Error(
+      "reverse_dag empty while forward_dag non-empty — refusing to ship a poisoned course corpus",
+    );
+  }
+  console.error(
+    `[build-worker-corpus]   total courses: ${recordCount}, forward roots: ${Object.keys(parsed.forward_dag).length}, reverse roots: ${Object.keys(parsed.reverse_dag).length}`,
+  );
+  return parsed;
+}
+
 async function scrapeCalendarsViaSubprocess() {
   const { execFileSync } = await import("node:child_process");
   console.error("[build-worker-corpus] scraping calendars (6 sources)...");
@@ -365,6 +417,15 @@ async function main() {
     rows: calendarPayload.rows,
     per_source: calendarPayload.per_source,
     built_at: builtAt,
+  };
+
+  const coursesPayload = await scrapeCatalogViaSubprocess();
+  out.courses = {
+    version: coursesPayload.version,
+    scraped_at: coursesPayload.scraped_at,
+    records: coursesPayload.records,
+    forward_dag: coursesPayload.forward_dag,
+    reverse_dag: coursesPayload.reverse_dag,
   };
 
   // ---- v0.5.0: bake synonyms ---------------------------------------------
