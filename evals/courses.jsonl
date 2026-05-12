@@ -1,0 +1,64 @@
+// Eval set for the v0.6.0 MSU course-catalog tools.
+// Every expected_codes / expected_codes_subset value comes from the
+// live catalog.msstate.edu scrape baked into worker/corpus.json
+// (scraped_at 2026-05-12T15:24:31.779Z). Authoring is corpus-rule-clean —
+// no training-data fallback, no third-party mirrors.
+//
+// Schema per line:
+//   { "type": "course_explain", "q": string, "expected_codes": [code] }
+//   { "type": "prereq_chain", "q": string, "root": code, "expected_codes_subset": [code, ...] }
+//   { "type": "unlocks", "q": string, "root": code, "expected_codes_subset": [code, ...] }
+//
+// Counts: course_explain=23, prereq_chain=14, unlocks=15
+{"type":"course_explain","q":"data communications and computer networks","expected_codes":["CSE 4153"]}
+{"type":"course_explain","q":"operating systems class","expected_codes":["CSE 4733"]}
+{"type":"course_explain","q":"data structures and analysis of algorithms","expected_codes":["CSE 2383"]}
+{"type":"course_explain","q":"intermediate computer programming","expected_codes":["CSE 1384"]}
+{"type":"course_explain","q":"introduction to computer programming","expected_codes":["CSE 1284"]}
+{"type":"course_explain","q":"artificial intelligence course","expected_codes":["CSE 4633"]}
+{"type":"course_explain","q":"database management systems class","expected_codes":["CSE 4503"]}
+{"type":"course_explain","q":"principles of computer graphics","expected_codes":["CSE 4413"]}
+{"type":"course_explain","q":"software engineering senior project","expected_codes":["CSE 4214"]}
+{"type":"course_explain","q":"introduction to formal languages and automata","expected_codes":["CSE 3813"]}
+{"type":"course_explain","q":"discrete mathematics for computer science","expected_codes":["CSE 2813"]}
+{"type":"course_explain","q":"calculus I","expected_codes":["MA 1713"]}
+{"type":"course_explain","q":"calculus III","expected_codes":["MA 2733"]}
+{"type":"course_explain","q":"integral calculus II","expected_codes":["MA 2743"]}
+{"type":"course_explain","q":"introductory statistics","expected_codes":["MA 2113"]}
+{"type":"course_explain","q":"biology I","expected_codes":["BIO 1134"]}
+{"type":"course_explain","q":"biology II","expected_codes":["BIO 1144"]}
+{"type":"course_explain","q":"english composition I","expected_codes":["EN 1103"]}
+{"type":"course_explain","q":"english composition II","expected_codes":["EN 1113"]}
+{"type":"course_explain","q":"general chemistry I","expected_codes":["CH 1213"]}
+{"type":"course_explain","q":"physics II","expected_codes":["PH 2223"]}
+{"type":"course_explain","q":"microprocessors and microcomputers","expected_codes":["ECE 3724"]}
+{"type":"course_explain","q":"engineering mechanics I","expected_codes":["EM 2413"]}
+{"type":"prereq_chain","q":"what are the prereqs for CSE 4153?","root":"CSE 4153","expected_codes_subset":["CSE 3724"]}
+{"type":"prereq_chain","q":"what are the prereqs for CSE 4733?","root":"CSE 4733","expected_codes_subset":["CSE 3183"]}
+{"type":"prereq_chain","q":"what are the prereqs for CSE 4163?","root":"CSE 4163","expected_codes_subset":["CSE 3183"]}
+{"type":"prereq_chain","q":"what are the prereqs for CSE 3813?","root":"CSE 3813","expected_codes_subset":["CSE 2383"]}
+{"type":"prereq_chain","q":"what are the prereqs for ECE 4793?","root":"ECE 4793","expected_codes_subset":["ECE 3724"]}
+{"type":"prereq_chain","q":"what are the prereqs for ACC 3013?","root":"ACC 3013","expected_codes_subset":["ACC 2013"]}
+{"type":"prereq_chain","q":"what are the prereqs for ACC 3023?","root":"ACC 3023","expected_codes_subset":["ACC 2013"]}
+{"type":"prereq_chain","q":"what are the prereqs for ACC 4013?","root":"ACC 4013","expected_codes_subset":["ACC 2013"]}
+{"type":"prereq_chain","q":"what are the prereqs for ACC 4033?","root":"ACC 4033","expected_codes_subset":["ACC 3003"]}
+{"type":"prereq_chain","q":"what are the prereqs for FIN 3123?","root":"FIN 3123","expected_codes_subset":["EC 2123"]}
+{"type":"prereq_chain","q":"what are the prereqs for MGT 3213?","root":"MGT 3213","expected_codes_subset":["EN 1113"]}
+{"type":"prereq_chain","q":"what are the prereqs for ME 3403?","root":"ME 3403","expected_codes_subset":["CH 1223"]}
+{"type":"prereq_chain","q":"what are the prereqs for ME 3513?","root":"ME 3513","expected_codes_subset":["CH 1213"]}
+{"type":"prereq_chain","q":"what are the prereqs for PH 2223?","root":"PH 2223","expected_codes_subset":["PH 2213"]}
+{"type":"unlocks","q":"what unlocks after CSE 1284?","root":"CSE 1284","expected_codes_subset":["CSE 2813"]}
+{"type":"unlocks","q":"what unlocks after CSE 1384?","root":"CSE 1384","expected_codes_subset":["ECE 3724"]}
+{"type":"unlocks","q":"what unlocks after CSE 2383?","root":"CSE 2383","expected_codes_subset":["CSE 4503"]}
+{"type":"unlocks","q":"what unlocks after CSE 2813?","root":"CSE 2813","expected_codes_subset":["CSE 4503"]}
+{"type":"unlocks","q":"what unlocks after CSE 3183?","root":"CSE 3183","expected_codes_subset":["CSE 4733"]}
+{"type":"unlocks","q":"what unlocks after CSE 3724?","root":"CSE 3724","expected_codes_subset":["CSE 4153"]}
+{"type":"unlocks","q":"what unlocks after MA 1713?","root":"MA 1713","expected_codes_subset":["AEC 8163"]}
+{"type":"unlocks","q":"what unlocks after MA 2733?","root":"MA 2733","expected_codes_subset":["ASE 3333"]}
+{"type":"unlocks","q":"what unlocks after ECE 3714?","root":"ECE 3714","expected_codes_subset":["ECE 3724"]}
+{"type":"unlocks","q":"what unlocks after ECE 3724?","root":"ECE 3724","expected_codes_subset":["CSE 4153"]}
+{"type":"unlocks","q":"what unlocks after EM 2413?","root":"EM 2413","expected_codes_subset":["ME 3403"]}
+{"type":"unlocks","q":"what unlocks after BIO 1134?","root":"BIO 1134","expected_codes_subset":["PO 3103"]}
+{"type":"unlocks","q":"what unlocks after CH 1213?","root":"CH 1213","expected_codes_subset":["ME 3513"]}
+{"type":"unlocks","q":"what unlocks after ACC 2013?","root":"ACC 2013","expected_codes_subset":["ACC 3013"]}
+{"type":"unlocks","q":"what unlocks after ACC 2023?","root":"ACC 2023","expected_codes_subset":["ACC 3013"]}
