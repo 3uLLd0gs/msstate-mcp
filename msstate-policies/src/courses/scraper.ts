@@ -14,6 +14,8 @@
  */
 import { load as cheerioLoad } from "cheerio";
 import { CATALOG_ROOTS, CatalogWafError, COURSE_CODE_RE } from "./types.js";
+import { parseCourseHtml } from "./parser.js";
+import type { Course, CourseCorpus, DagAdjacency } from "./types.js";
 
 const CATALOG_HOST = "https://catalog.msstate.edu";
 
@@ -78,4 +80,157 @@ export function isAllowedCatalogUrl(url: string): boolean {
   if (u.protocol !== "https:") return false;
   if (u.host !== "catalog.msstate.edu") return false;
   return CATALOG_ROOTS.some((root) => url.startsWith(root));
+}
+
+const UA = "msstate-policies-mcp/0.6.0 (build-worker-corpus)";
+const FETCH_TIMEOUT_MS = 15_000;
+const CONCURRENCY = 4;
+const JITTER_MIN_MS = 200;
+const JITTER_MAX_MS = 600;
+
+let injectedFetch: typeof fetch | null = null;
+export async function withFetchInjected<T>(f: typeof fetch, fn: () => Promise<T>): Promise<T> {
+  injectedFetch = f;
+  try {
+    return await fn();
+  } finally {
+    injectedFetch = null;
+  }
+}
+
+async function getJson(url: string): Promise<string> {
+  const f = injectedFetch ?? fetch;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await f(url, { headers: { "User-Agent": UA }, signal: ctrl.signal });
+    if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+    const text = await res.text();
+    if (detectCatalogWaf(text)) throw new CatalogWafError(url);
+    return text;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function jitter(): Promise<void> {
+  const ms = JITTER_MIN_MS + Math.floor(Math.random() * (JITTER_MAX_MS - JITTER_MIN_MS));
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+export async function fetchCourseDetail(code: string): Promise<Course> {
+  if (!COURSE_CODE_RE.test(code)) {
+    throw new Error(`invalid course code: ${code}`);
+  }
+  const [dept, num] = code.split(/\s+/);
+  const url = `${CATALOG_HOST}/search/?P=${encodeURIComponent(dept)}%20${num}`;
+  if (!isAllowedCatalogUrl(url)) throw new Error(`URL not in allowlist: ${url}`);
+  const html = await getJson(url);
+  const parsed = parseCourseHtml(html, code);
+  if (!parsed) throw new Error(`could not parse course detail for ${code}`);
+  return parsed;
+}
+
+export interface ScrapeAllOptions {
+  /** Override for tests / dry-run. */
+  fetchIndex?: () => Promise<string>;
+  fetchDept?: (deptUrl: string) => Promise<string>;
+  catalogVersion?: string;
+}
+
+export interface ScrapeAllResult extends Pick<CourseCorpus, "version" | "scraped_at" | "records" | "forward_dag" | "reverse_dag"> {
+  per_dept: Record<string, { course_count: number; error: string | null }>;
+  anyError: boolean;
+}
+
+async function pool<I, O>(items: I[], conc: number, fn: (i: I) => Promise<O>): Promise<O[]> {
+  const out: O[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i]);
+      await jitter();
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(conc, items.length) }, worker));
+  return out;
+}
+
+export async function scrapeAllCourses(opts: ScrapeAllOptions = {}): Promise<ScrapeAllResult> {
+  const indexFetcher = opts.fetchIndex ?? (() => getJson(`${CATALOG_HOST}/azindex/`));
+  const deptFetcher = opts.fetchDept ?? ((u) => getJson(u));
+
+  const indexHtml = await indexFetcher();
+  const deptUrls = extractDeptPagesFromIndexHtml(indexHtml);
+  if (deptUrls.length === 0) {
+    throw new Error("no dept pages found in azindex — refusing to ship a poisoned course corpus");
+  }
+
+  const per_dept: Record<string, { course_count: number; error: string | null }> = {};
+  const allCodes = new Set<string>();
+
+  for (const deptUrl of deptUrls) {
+    try {
+      const deptHtml = await deptFetcher(deptUrl);
+      const codes = extractCourseCodesFromDeptHtml(deptHtml);
+      if (codes.length === 0) {
+        per_dept[deptUrl] = { course_count: 0, error: "zero courses extracted" };
+        continue;
+      }
+      for (const c of codes) allCodes.add(c);
+      per_dept[deptUrl] = { course_count: codes.length, error: null };
+    } catch (e) {
+      per_dept[deptUrl] = { course_count: 0, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  const codes = Array.from(allCodes);
+  const fetched = await pool(codes, CONCURRENCY, async (code) => {
+    try {
+      return { code, course: await fetchCourseDetail(code), error: null as string | null };
+    } catch (e) {
+      return { code, course: null, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+
+  const records: Record<string, Course> = {};
+  const forward_dag: DagAdjacency = {};
+  let parseExceptions = 0;
+  for (const r of fetched) {
+    if (!r.course) { parseExceptions++; continue; }
+    records[r.code] = r.course;
+    const prereqCodes = r.course.prereqs?.required_courses ?? [];
+    if (prereqCodes.length > 0) forward_dag[r.code] = prereqCodes;
+  }
+
+  const parseRate = fetched.length === 0 ? 1 : 1 - parseExceptions / fetched.length;
+  if (parseRate < 0.95) {
+    throw new Error(
+      `prereq parse exception rate ${(100 - parseRate * 100).toFixed(2)}% > 5% — refusing to ship a poisoned course corpus`,
+    );
+  }
+
+  const reverse_dag: DagAdjacency = {};
+  for (const [course, prereqs] of Object.entries(forward_dag)) {
+    for (const p of prereqs) {
+      if (!reverse_dag[p]) reverse_dag[p] = [];
+      reverse_dag[p].push(course);
+    }
+  }
+
+  if (Object.keys(forward_dag).length > 0 && Object.keys(reverse_dag).length === 0) {
+    throw new Error("reverse_dag empty while forward_dag non-empty — refusing to ship a poisoned course corpus");
+  }
+
+  return {
+    version: opts.catalogVersion ?? "current",
+    scraped_at: new Date().toISOString(),
+    records,
+    forward_dag,
+    reverse_dag,
+    per_dept,
+    anyError: Object.values(per_dept).some((d) => d.error !== null),
+  };
 }

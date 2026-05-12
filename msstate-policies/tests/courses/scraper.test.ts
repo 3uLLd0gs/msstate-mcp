@@ -4,7 +4,10 @@ import { resolve } from "node:path";
 import {
   extractCourseCodesFromDeptHtml,
   extractDeptPagesFromIndexHtml,
+  fetchCourseDetail,
+  withFetchInjected,
 } from "../../src/courses/scraper.js";
+import type { Course } from "../../src/courses/types.js";
 
 function fixture(name: string): string {
   return readFileSync(
@@ -59,5 +62,46 @@ describe("extractDeptPagesFromIndexHtml", () => {
       ]),
     );
     expect(pages.find((p) => p.includes("evil.example.com"))).toBeUndefined();
+  });
+});
+
+describe("fetchCourseDetail", () => {
+  it("returns a parsed Course on 200", async () => {
+    const html = fixture("cse-4153.html");
+    const fake = async (url: string) => {
+      expect(url).toBe("https://catalog.msstate.edu/search/?P=CSE%204153");
+      return { ok: true, status: 200, text: async () => html };
+    };
+    const result = await withFetchInjected(fake as unknown as typeof fetch, () =>
+      fetchCourseDetail("CSE 4153"),
+    );
+    expect(result.code).toBe("CSE 4153");
+  });
+
+  it("throws CatalogWafError on Cloudflare interstitial", async () => {
+    const fake = async () => ({
+      ok: true,
+      status: 200,
+      text: async () => "Just a moment...",
+    });
+    await expect(
+      withFetchInjected(fake as unknown as typeof fetch, () =>
+        fetchCourseDetail("CSE 4153"),
+      ),
+    ).rejects.toThrow(/WAF/);
+  });
+
+  it("rejects an invalid course code without making a request", async () => {
+    let called = false;
+    const fake = async () => {
+      called = true;
+      return { ok: true, status: 200, text: async () => "" };
+    };
+    await expect(
+      withFetchInjected(fake as unknown as typeof fetch, () =>
+        fetchCourseDetail("DROP TABLE"),
+      ),
+    ).rejects.toThrow();
+    expect(called).toBe(false);
   });
 });
