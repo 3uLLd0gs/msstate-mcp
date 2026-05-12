@@ -393,4 +393,45 @@ else
   note "FAIL" "CAL5 Authorization regressed into CORS allowlist" 0
 fi
 
+# ---- v0.6.0: course catalog security checks ---------------------------------
+
+# CAT1: every https URL inside the courses module stays on msstate.edu.
+CAT1_HITS=$(grep -RhoE "https://[a-zA-Z0-9.\-]+" msstate-policies/src/courses/ 2>/dev/null \
+  | grep -vE "^https://([a-zA-Z0-9.\-]+\.)?msstate\.edu(/|$)" \
+  | sort -u)
+if [ -z "$CAT1_HITS" ]; then
+  score=$((score + 4))
+  note "PASS" "CAT1 all course-module URLs stay on msstate.edu" 4
+else
+  note "FAIL" "CAT1 non-msstate.edu URL in src/courses/: $CAT1_HITS" 4
+fi
+
+# CAT2: Worker length-caps every course-tool input before parse.
+if grep -qE "MAX_QUERY_CHARS" worker/src/index.ts \
+   && grep -qE "search_msu_courses" worker/src/index.ts \
+   && grep -qE "get_msu_course\b" worker/src/index.ts \
+   && grep -qE "get_msu_course_graph" worker/src/index.ts ; then
+  score=$((score + 2))
+  note "PASS" "CAT2 Worker length-caps course-tool input before parse" 2
+else
+  note "FAIL" "CAT2 Worker missing length cap before parse for course tools" 2
+fi
+
+# CAT3: build script aborts on poisoned course corpus.
+if grep -qF "refusing to ship a poisoned course corpus" scripts/build-worker-corpus.mjs; then
+  score=$((score + 2))
+  note "PASS" "CAT3 build aborts on poisoned course corpus" 2
+else
+  note "FAIL" "CAT3 build-worker-corpus.mjs missing course-corpus poison-abort" 2
+fi
+
+# CAT4: CATALOG_ROOTS allowlist exists and is frozen.
+if grep -qE "Object\.freeze" msstate-policies/src/courses/types.ts \
+   && grep -qE "CATALOG_ROOTS" msstate-policies/src/courses/types.ts ; then
+  score=$((score + 2))
+  note "PASS" "CAT4 CATALOG_ROOTS frozen allowlist present in types.ts" 2
+else
+  note "FAIL" "CAT4 CATALOG_ROOTS allowlist missing or not frozen" 2
+fi
+
 echo "$score"
