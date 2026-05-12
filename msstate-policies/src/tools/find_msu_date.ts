@@ -99,13 +99,16 @@ export const find_msu_date = {
       }
     }
 
-    const notes = buildNotes(matches, fallbackTriggered, term);
+    // v0.5.0: strip internal contentHash from wire response.
+    const wireMatches = matches.map(({ contentHash: _omit, ...rest }) => rest);
+
+    const notes = buildNotes(wireMatches, fallbackTriggered, term);
     return {
       content: [
         {
           type: "text" as const,
           text: JSON.stringify(
-            { q: input.q, matches, notes, corpus_built_at: null },
+            { q: input.q, matches: wireMatches, notes, corpus_built_at: null },
             null,
             2,
           ),
@@ -120,13 +123,14 @@ function buildNotes(
   fallbackTriggered: boolean,
   term: string | null,
 ): string {
+  const modeNote = "BM25 with synonyms";
+
   if (matches.length === 0) {
-    return "No MSU calendar row matched this query. If the question is about an MSU date or deadline, try a more specific phrasing or check the source calendar directly.";
+    return `No MSU calendar row matched this query. ${modeNote}. If the question is about an MSU date or deadline, try a more specific phrasing or check the source calendar directly.`;
   }
   if (fallbackTriggered && term) {
-    return `Surfaced academic_calendar rows for ${term} as fallback — if your primary source didn't have this term, the academic calendar is authoritative for term-boundary dates.`;
+    return `Added academic_calendar rows for ${term} — if your primary source didn't have this term, the academic calendar is authoritative for term-boundary dates. ${modeNote}.`;
   }
-  // Detect multi-year coverage: same event-stem appearing across distinct terms
   const byStem = new Map<string, Set<string>>();
   for (const m of matches) {
     const firstWord = m.event.split(/\s+/).filter((w) => !/^(the|a|an|of|for|to|in|on|at)$/i.test(w))[0] ?? m.event;
@@ -137,8 +141,8 @@ function buildNotes(
   const multiYearStems = [...byStem.entries()].filter(([, terms]) => terms.size >= 2);
   if (multiYearStems.length > 0) {
     const [stem, terms] = multiYearStems[0];
-    return `Multi-year matches: '${stem}' appears in ${terms.size} distinct terms (${[...terms].join(", ")}). Present each year-version separately.`;
+    return `Multi-year matches: '${stem}' appears in ${terms.size} distinct terms (${[...terms].join(", ")}). Present each year-version separately. ${modeNote}.`;
   }
-  return "";
+  return modeNote;
 }
 
