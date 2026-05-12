@@ -36,6 +36,7 @@ function arg(name, def) {
 const overrideK = arg("k", null) ? Number(arg("k")) : null;
 const limit = arg("limit", null) ? Number(arg("limit")) : null;
 const noJudge = arg("no-judge", false) === true;
+const suite = arg("suite", "policies");
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
 const evalDir = resolve(root, "msstate-policies", "eval");
@@ -45,6 +46,128 @@ const distPath = resolve(root, "msstate-policies", "dist", "index.js");
 if (!existsSync(distPath)) {
   console.error(`run-eval: ${distPath} not found — run \`npm run build\` first`);
   process.exit(1);
+}
+
+// ---- courses suite (no LLM judge — deterministic containment checks) -----
+if (suite === "courses") {
+  const { spawn: spawnCourses } = await import("node:child_process");
+  const coursesPath = resolve(root, "evals", "courses.jsonl");
+  if (!existsSync(coursesPath)) {
+    console.error(`run-eval: ${coursesPath} not found`);
+    process.exit(1);
+  }
+  const rows = readFileSync(coursesPath, "utf8")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("//"))
+    .map((l) => JSON.parse(l));
+
+  class CourseMcp {
+    constructor() {
+      this.proc = spawnCourses("node", [distPath], { stdio: ["pipe", "pipe", "inherit"] });
+      this.buf = "";
+      this.pending = new Map();
+      this.nextId = 1;
+      this.proc.stdout.on("data", (chunk) => {
+        this.buf += chunk.toString();
+        let nl;
+        while ((nl = this.buf.indexOf("\n")) >= 0) {
+          const line = this.buf.slice(0, nl);
+          this.buf = this.buf.slice(nl + 1);
+          if (!line.trim()) continue;
+          try {
+            const msg = JSON.parse(line);
+            if (msg.id && this.pending.has(msg.id)) {
+              const { r, j } = this.pending.get(msg.id);
+              this.pending.delete(msg.id);
+              if (msg.error) j(new Error(msg.error.message ?? "MCP error"));
+              else r(msg.result);
+            }
+          } catch { /* ignore */ }
+        }
+      });
+    }
+    call(method, params) {
+      const id = this.nextId++;
+      return new Promise((r, j) => {
+        this.pending.set(id, { r, j });
+        this.proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      });
+    }
+    async init() {
+      await this.call("initialize", {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "run-eval-courses", version: "0.1.0" },
+      });
+    }
+    callTool(name, args) {
+      return this.call("tools/call", { name, arguments: args });
+    }
+    close() { this.proc.kill(); }
+  }
+
+  const mcp = new CourseMcp();
+  await mcp.init();
+  const out = { course_explain: { pass: 0, fail: 0 }, prereq_chain: { pass: 0, fail: 0 }, unlocks: { pass: 0, fail: 0 } };
+  const failures = [];
+  for (const row of rows) {
+    let ok = false;
+    let detail = "";
+    try {
+      if (row.type === "course_explain") {
+        const res = await mcp.callTool("search_msu_courses", { q: row.q, limit: 10 });
+        const parsed = JSON.parse(res.content[0].text);
+        const codes = (parsed.matches ?? []).map((m) => m.code);
+        ok = (row.expected_codes ?? []).some((c) => codes.includes(c));
+        detail = `got [${codes.slice(0, 5).join(", ")}]`;
+      } else if (row.type === "prereq_chain" || row.type === "unlocks") {
+        const m = /\b([A-Z]{2,4})\s*(\d{4})\b/.exec((row.root ?? row.q).toUpperCase());
+        if (!m) {
+          detail = "no root code found in row";
+        } else {
+          const code = `${m[1]} ${m[2]}`;
+          const direction = row.type === "prereq_chain" ? "prereqs" : "unlocks";
+          const res = await mcp.callTool("get_msu_course_graph", { code, direction, depth: 10 });
+          const parsed = JSON.parse(res.content[0].text);
+          const codes = (parsed.nodes ?? []).map((n) => n.code);
+          ok = (row.expected_codes_subset ?? []).every((c) => codes.includes(c));
+          detail = `got [${codes.slice(0, 8).join(", ")}]`;
+        }
+      }
+    } catch (err) {
+      detail = `error: ${err.message}`;
+    }
+    out[row.type][ok ? "pass" : "fail"] += 1;
+    if (!ok) failures.push({ type: row.type, q: row.q, detail });
+  }
+  mcp.close();
+
+  const total = (t) => out[t].pass + out[t].fail;
+  const rate = (t) => total(t) ? (out[t].pass / total(t)) : 1;
+  const summary = {
+    suite: "courses",
+    counts: {
+      course_explain: out.course_explain,
+      prereq_chain: out.prereq_chain,
+      unlocks: out.unlocks,
+    },
+    rates: {
+      course_explain: Number(rate("course_explain").toFixed(3)),
+      prereq_chain: Number(rate("prereq_chain").toFixed(3)),
+      unlocks: Number(rate("unlocks").toFixed(3)),
+    },
+  };
+  console.log(JSON.stringify(summary, null, 2));
+  for (const f of failures.slice(0, 20)) console.error("FAIL", f.type, "|", f.q, "→", f.detail);
+
+  // Thresholds per spec §1.
+  const thresholds = { course_explain: 0.9, prereq_chain: 0.95, unlocks: 0.95 };
+  let pass = true;
+  for (const k of Object.keys(thresholds)) {
+    if (total(k) > 0 && rate(k) < thresholds[k]) pass = false;
+  }
+  process.exit(pass ? 0 : 1);
 }
 
 const allQuestions = readFileSync(questionsPath, "utf8")
