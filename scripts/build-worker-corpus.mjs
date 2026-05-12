@@ -327,7 +327,9 @@ async function scrapeCalendarsViaSubprocess() {
 }
 
 async function main() {
+  const skipCatalog = process.argv.includes("--skip-catalog");
   console.error("build-worker-corpus: fetching index...");
+  if (skipCatalog) console.error("build-worker-corpus: --skip-catalog enabled (reusing courses block)");
   const html = await fetchText(`${BASE}/current`);
   const $ = cheerioLoad(html);
 
@@ -436,14 +438,37 @@ async function main() {
     `[build-worker-corpus]   academic_calendar+sfa multi-day rows: ${multiDayCount}`,
   );
 
-  const coursesPayload = await scrapeCatalogViaSubprocess();
-  out.courses = {
-    version: coursesPayload.version,
-    scraped_at: coursesPayload.scraped_at,
-    records: coursesPayload.records,
-    forward_dag: coursesPayload.forward_dag,
-    reverse_dag: coursesPayload.reverse_dag,
-  };
+  if (skipCatalog) {
+    // Reuse the existing courses block from the on-disk corpus.
+    // Fails loudly if there's nothing to reuse (no silent corpus drift).
+    let existingCourses;
+    try {
+      const prior = JSON.parse(readFileSync(outPath, "utf8"));
+      existingCourses = prior.courses;
+    } catch (err) {
+      throw new Error(
+        `--skip-catalog requires an existing worker/corpus.json with a courses block (read failed: ${err.message})`,
+      );
+    }
+    if (!existingCourses || !existingCourses.records) {
+      throw new Error(
+        "--skip-catalog: existing worker/corpus.json has no usable courses block",
+      );
+    }
+    out.courses = existingCourses;
+    console.error(
+      `[build-worker-corpus]   reusing existing courses block (${Object.keys(existingCourses.records).length} records, scraped_at ${existingCourses.scraped_at})`,
+    );
+  } else {
+    const coursesPayload = await scrapeCatalogViaSubprocess();
+    out.courses = {
+      version: coursesPayload.version,
+      scraped_at: coursesPayload.scraped_at,
+      records: coursesPayload.records,
+      forward_dag: coursesPayload.forward_dag,
+      reverse_dag: coursesPayload.reverse_dag,
+    };
+  }
 
   // ---- v0.5.0: bake synonyms ---------------------------------------------
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
