@@ -214,6 +214,19 @@ Three quality-of-life fixes on top of v0.4.0:
 
 Semantic embedding for calendars is **deferred to v0.5.0** — the BM25 semantic gap on natural-language queries like *"when does the semester start"* vs the event title *"Classes begin"* remains until then. v0.4.1's smart-fallback path mitigates the most painful cases (queries that name a specific term) but doesn't solve the broader semantic-match problem.
 
+### Calendar synonym expansion (v0.5.0, 2026-05-12)
+
+Adds LLM-generated paraphrases on each calendar row to close the BM25 semantic gap:
+
+- **Anthropic Claude Haiku at build time.** `scripts/build-worker-corpus.mjs` paraphrases each event title into 5 short keyword-search-friendly synonyms (no dates, no digits, ≤80 chars each). Cached by `contentHash` so incremental rebuilds only re-paraphrase changed rows. Cost: ~$0.50 per full rebuild.
+- **Zero runtime API.** `find_msu_date` runs pure 4-field BM25 (`event`×3, `synonyms`×2, `term`×1, `description`×1) at query time. No fetch, no key needed.
+- **Sidecar `dist/calendar-synonyms.json`** lets the stdio plugin (which scrapes live) attach baked synonyms to scraped rows by `contentHash`.
+- **Eval methodology.** `evals/calendar-synonyms-eval.ts` ships 30 ground-truth queries. Ship-blocker thresholds: semantic_gap lift ≥ +10pp, bm25_favorable regression ≤ 5pp. v0.5.0 ships at +13.3pp lift, 0pp regression.
+- **Security envelope.** Round-2 checklist 192 → 220 via SYN1-SYN6 + CAL5 regression guard. **SYN4 is load-bearing**: `api.anthropic.com` must never appear in `msstate-policies/src/` or `worker/src/` — only in the build script.
+- **Robust JSON extraction.** Build script strips markdown code fences from Haiku responses and uses an assistant-prefill `[` to force JSON-array continuation. Honors `retry-after` on 429s with concurrency tuned to 2 for tier-1 rate limits.
+
+Pivot history: an earlier v0.5.0 design used query-time Voyage embeddings; that was rejected on the zero-runtime-cost constraint. See `.dev/specs/2026-05-12-v0.5.0-calendar-embeddings-design.md` for the current design and pivot rationale.
+
 ## Decision log (chronological)
 
 ### Plan revisions (v1 → v7, all in git history)

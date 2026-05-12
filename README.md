@@ -221,6 +221,12 @@ Smaller corpus than the live MCP (22 of 218 policies), but works on **free** cla
 
 ---
 
+### v0.5.0 — Synonym expansion (zero runtime cost)
+
+v0.5.0 adds LLM-generated paraphrases on each calendar row so BM25 can answer natural-language queries like "when does the semester start" or "turkey day." All ML work happens at **build time** via Anthropic Claude Haiku; at query time the tool is pure BM25 — **no third-party API calls, no API keys at runtime, no ongoing operational cost**.
+
+Self-hosters rebuilding the corpus need an `ANTHROPIC_API_KEY` for the build step (~$0.50 per full rebuild). Runtime users (Worker, npm consumers) need nothing extra.
+
 ## What a response looks like
 
 Ask Claude *"What is MSU's hazing policy?"* and you'll see something like:
