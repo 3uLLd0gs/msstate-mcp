@@ -44,6 +44,7 @@
  */
 import { load as cheerioLoad } from "cheerio";
 import { formatCitation, type CalendarRow, type CalendarSource } from "../types.js";
+import { log } from "../../log.js";
 
 export type TermPageSource = Extract<
   CalendarSource,
@@ -112,6 +113,8 @@ interface RawRow {
   event: string;
   /** ISO date string YYYY-MM-DD extracted from <time datetime>. */
   isoDate: string;
+  /** Optional end-date for multi-day ranges (second <time datetime>). */
+  isoDateEnd?: string;
   /** Optional raw time string (e.g. "8:00 am to 11:00 am"). */
   time?: string;
 }
@@ -129,28 +132,43 @@ function extractAcademicCalendarRows(html: string): RawRow[] {
 
   $("div.row.g-0").each((_i, el) => {
     const $row = $(el);
-    // Only process rows that also have 'border-bottom' class — these are data rows.
     if (!$row.hasClass("border-bottom")) return;
 
-    const timeEl = $row.find("time[datetime]").first();
-    if (!timeEl.length) return;
+    const dateCol = $row.find("div[class*='col-md-4']").first();
+    const timeEls = dateCol.find("time[datetime]").toArray();
+    if (timeEls.length === 0) return;
 
-    const datetime = timeEl.attr("datetime") ?? "";
-    const isoMatch = datetime.match(/^(\d{4}-\d{2}-\d{2})/);
-    if (!isoMatch) return;
-    const isoDate = isoMatch[1];
+    const firstDatetime = $(timeEls[0]).attr("datetime") ?? "";
+    const firstMatch = firstDatetime.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (!firstMatch) return;
+    const isoDate = firstMatch[1];
 
-    // Event text is in the col-md-8 div (the wider column).
+    let isoDateEnd: string | undefined;
+    if (timeEls.length >= 2) {
+      const lastDatetime = $(timeEls[timeEls.length - 1]).attr("datetime") ?? "";
+      const lastMatch = lastDatetime.match(/^(\d{4}-\d{2}-\d{2})/);
+      if (lastMatch) {
+        const candidate = lastMatch[1];
+        if (candidate >= isoDate) {
+          isoDateEnd = candidate;
+        } else {
+          log("warn", "academic_calendar end-date precedes start; dropping end", {
+            isoDate,
+            candidateEnd: candidate,
+          });
+        }
+      }
+    }
+
     const eventCol = $row.find("div[class*='col-md-8']").first();
     let event = eventCol.text().replace(/\s+/g, " ").trim();
     if (!event) {
-      // Fallback: strip the date text from the full row text.
-      const dateText = timeEl.text().trim();
+      const dateText = $(timeEls[0]).text().trim();
       event = $row.text().replace(dateText, "").replace(/\s+/g, " ").trim();
     }
     if (!event) return;
 
-    out.push({ event, isoDate });
+    out.push({ event, isoDate, isoDateEnd });
   });
 
   return out;
@@ -270,7 +288,7 @@ export function parseTermPage(
       source,
       event,
       start: r.isoDate,
-      end: r.isoDate,
+      end: r.isoDateEnd ?? r.isoDate,
       time: r.time,
       term: fullTerm,
       source_url: entry.url,
