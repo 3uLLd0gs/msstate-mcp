@@ -393,6 +393,16 @@ else
   note "FAIL" "CAL5 Authorization regressed into CORS allowlist" 0
 fi
 
+# CAL6: Build aborts if the calendar scrape produces zero multi-day rows.
+# Guards against a registrar HTML regression that would collapse every
+# range (Spring Break, Fall Break, advising windows) into a single day.
+if grep -qF "refusing to ship a calendar corpus with zero multi-day ranges" scripts/build-worker-corpus.mjs; then
+  score=$((score + 5))
+  note "PASS" "CAL6 build aborts on zero multi-day calendar rows" 5
+else
+  note "FAIL" "CAL6 build aborts on zero multi-day calendar rows" 5
+fi
+
 # ---- v0.6.0: course catalog security checks ---------------------------------
 
 # CAT1: every https URL inside the courses module stays on msstate.edu.
