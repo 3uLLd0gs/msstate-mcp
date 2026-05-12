@@ -1,6 +1,6 @@
 {
   "model": "claude-haiku-4-5",
-  "built_at": "2026-05-12T06:00:49.469Z",
+  "built_at": "2026-05-12T21:48:05.256Z",
   "synonyms": {
     "5e6863473c094260d15d2d5077d4ef7f346987c087933bb6f634750bfca6aaab": [
       "Payment deadline for class enrollment",
@@ -5972,6 +5972,174 @@
       "Maroon Band Check-In Day",
       "Band Move-In for Students",
       "Maroon Band Housing Start"
+    ],
+    "d65aa6a0888b2daa56a8dd8878476537eccedfaa6da45a57facf23d43f9c5087": [
+      "Summer Federal Work Study begins",
+      "Start summer Federal Work Study job",
+      "Begin Federal Work Study employment",
+      "First day of summer work study",
+      "Summer Federal Work Study job starts"
+    ],
+    "99f2bbc6f5f9ba18496311ec8dd1b09915842a761cb30a72153a7f6cf13e2a0d": [
+      "SAP appeal deadline",
+      "Submit summer appeal by deadline",
+      "Summer financial appeal due",
+      "Appeal deadline for SAP",
+      "Summer SAP submission deadline"
+    ],
+    "abc4f892843c7f731d8b1f6b13c2374023571ca987fa965e4b77d4bff4004e25": [
+      "Final day to drop or add course",
+      "Deadline to add or drop class",
+      "Last chance to drop or add course",
+      "Drop or add course deadline today",
+      "Final opportunity to modify enrollment"
+    ],
+    "aa1dd66caf49bd3699d520f22c2ae37e6d8075bd337ba4f749ac1b89761f899e": [
+      "Submit your FAFSA before the deadline",
+      "Final submission date for FAFSA forms",
+      "Complete your FAFSA application today",
+      "Deadline to turn in FAFSA paperwork",
+      "Last chance to file your FAFSA"
+    ],
+    "66ad84385b02df300eb0ea311600f15300cc9822a704d667970de751006fbd97": [
+      "SAP Appeal Statement of Understanding deadline",
+      "Final SAP Appeal Understanding Statement due",
+      "SAP Appeal deadline for Statement",
+      "Statement of Understanding SAP Appeal due",
+      "Submit SAP Appeal Understanding Statement"
+    ],
+    "33997556ce3438e1c1c0e7ff50660d284fd8d5bbe5eb67ed2b1a51470b72a2cb": [
+      "Summer ten week break",
+      "Ten week class break",
+      "Summer class break period",
+      "Break from summer classes",
+      "Ten week term break"
+    ],
+    "e6e5d59b7685f57f7fc1d610e1f6cc7b1fa31d7c8ad31248cb6ccdf6e7f2653f": [
+      "Independence Day holiday classes cancelled",
+      "Fourth of July break no classes",
+      "Holiday break independence day classes closed",
+      "Classes cancelled for independence holiday",
+      "No class scheduled holiday break"
+    ],
+    "66e5a4638ddf7c4eea217309b33bbe2929d8a9ced2388381a73b0fbaf5ae16c4": [
+      "Classes start again",
+      "Academic sessions begin",
+      "School resumes",
+      "Classes commence",
+      "Learning starts"
+    ],
+    "994579b16acedc1a2a9f30475dab8a572e4ee787d3bd6f9a8c6c2956343b1249": [
+      "Final deadline for course withdrawal with W grade",
+      "Drop course with W grade deadline today",
+      "Course withdrawal with W grade ends today",
+      "Last chance to drop course with W",
+      "Withdraw from course with W grade today"
+    ],
+    "61b83fff5687851c03d38fcf11d9ca8f9865968cc659aeda8934abfa1892887a": [
+      "Final withdrawal deadline approaching",
+      "Last chance to withdraw this term",
+      "Withdraw before term ends",
+      "Final day for course withdrawal",
+      "Withdrawal deadline nearly here"
+    ],
+    "2629bc454e0f3a03fb4d7cf045b76a57ea53de574f610d9f94ff8562ca1c760e": [
+      "Summer classes conclude",
+      "End of summer instruction",
+      "Summer term classes finish",
+      "Classes wrap up",
+      "Summer classes stop"
+    ],
+    "143846557e2cd6da89237d3d88fc5fd0947b9cf6d0f06b8ca99b255317e2f9bb": [
+      "Final day for summer Federal Work Study",
+      "Summer Federal Work Study ends today",
+      "Deadline for summer Federal Work Study work",
+      "Last opportunity for summer Federal Work Study",
+      "Summer Federal Work Study job final day"
+    ],
+    "3264cf8d2e6d6910bc4c36c1b09ef9af8b6f6d520068044873c61de88182181e": [
+      "Payment deadline or enrollment required",
+      "Full payment or payment plan enrollment",
+      "Payment deadline to avoid class cancellation",
+      "Enroll in payment plan or pay in full",
+      "Payment or plan enrollment required"
+    ],
+    "17d0fc0a90e35c702951b7706bbd5dc853a775e1a159054529042d68b0558b15": [
+      "Start working fall Federal Work Study",
+      "Begin fall Federal Work Study employment",
+      "First day of fall work study",
+      "Commence fall Federal Work Study job",
+      "Start fall Federal Work Study position"
+    ],
+    "8834db4f340d5e1d793cc1c64f1d2490d5a950baa7b0f2cd6c8913e26f362af5": [
+      "Final registration and course add deadline",
+      "Last chance to register or add classes",
+      "Course registration deadline today",
+      "Register or add courses final day",
+      "Final day for class registration"
+    ],
+    "3018fcf1d5469dc297301254fbd89b7d741427d3165dd9fd63726c3010b05667": [
+      "Submit your MTAG and MESG application now",
+      "MTAG and MESG applications due",
+      "Deadline for MTAG MESG grant applications",
+      "Apply for MTAG and MESG funding",
+      "Last day to submit MTAG MESG application"
+    ],
+    "e1b80340a45e724573625151ce81068e9d1622382f94688afda64017f926b8cc": [
+      "Apply for state aid online",
+      "State aid application open",
+      "Financial aid application available",
+      "Submit state aid application",
+      "State grant application access"
+    ],
+    "050e8b36f66e31cb71cda808fed909873072ae002fecf761d6198252e53d61a8": [
+      "Apply for general scholarships",
+      "General scholarship applications available",
+      "Open scholarship application period",
+      "Submit your scholarship application",
+      "Scholarship application starts now"
+    ],
+    "d70c227ecf96c0a6ca2f8713714fa8359e32be55bec7697f17459be7dcb33756": [
+      "Final deadline to drop course with W grade",
+      "Drop course with W mark deadline today",
+      "Last chance to withdraw from course",
+      "Course withdrawal deadline with W grade",
+      "Final day to drop class with withdrawal"
+    ],
+    "14a70fc584165231f899c02f7019098aa5b1e29209fc71bd5d017cdbb5ae18d8": [
+      "Spring semester early sign up",
+      "Register early for spring classes",
+      "Spring enrollment period starts",
+      "Get ahead with spring registration",
+      "Pre-enroll for upcoming spring term"
+    ],
+    "d4fb05baf602832d58fc23b5c963a664fc8bb557b16d8c645165074906bfcd75": [
+      "Semester withdrawal deadline approaching",
+      "Final day to drop classes this term",
+      "Last chance to withdraw from semester",
+      "Withdrawal deadline before semester ends",
+      "Final withdrawal date for current term"
+    ],
+    "3a80a256560e2fb734c1dac73ea56d519ed1b86a564e8cdc52a7fd46a2254257": [
+      "Apply for freshman general scholarship by deadline",
+      "Freshman scholarship application priority deadline",
+      "General scholarship application window for new students",
+      "Submit freshman general scholarship before deadline",
+      "Freshman general scholarship application closing date"
+    ],
+    "2f02586bf199bd6975e7649e1f1f8c870a7d815f6f33159dc8171a2a0cd5699d": [
+      "Last day of classes",
+      "Classes finish",
+      "End of term instruction",
+      "Final class session",
+      "Classes conclude"
+    ],
+    "c7fcd35e2c6cf774bef61e6d43f64018f85c6a6423dffca5315c95770d157218": [
+      "Final day for fall work study jobs",
+      "Last chance to complete fall work study",
+      "Deadline for fall federal work study",
+      "Final work study employment day this fall",
+      "Last opportunity for fall work study"
     ]
   }
 }
