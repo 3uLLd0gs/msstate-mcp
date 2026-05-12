@@ -44,6 +44,28 @@ export const CALENDAR_PARENT: Record<CalendarSource, CalendarSource | null> = {
   housing:              "academic_calendar",
 };
 
+/** Quantized 512-dim embedding. `data` is base64-encoded Int8Array.
+ *  Stored in worker/corpus.json and dist/calendar-vectors.json. */
+export interface EmbeddingSerialized {
+  scale: number;
+  data: string; // base64 of Int8Array
+}
+
+/** Decoded form held in memory after deserialization. */
+export interface Embedding {
+  scale: number;
+  data: Int8Array;
+}
+
+/** hash → embedding lookup. Both serialized and in-memory variants exist. */
+export type EmbeddingMapSerialized = Record<string, EmbeddingSerialized>;
+export type EmbeddingMap = Map<string, Embedding>;
+
+/** The embedding model in use. Single-source-of-truth constant; any drift
+ *  between corpus.json and runtime triggers an EMB6 security-checklist fail. */
+export const EMBED_MODEL = "voyage-3-lite" as const;
+export const EMBED_DIM = 512 as const;
+
 export interface CalendarRow {
   source: CalendarSource;
   /** Event/deadline name, e.g. "Spring Break", "Halls Close for Spring 2026". */
@@ -69,6 +91,11 @@ export interface CalendarRow {
   /** Set to true by `find_msu_date` when this row was appended via the smart-fallback
    *  path. Never set at parse/scrape time; never serialized into worker/corpus.json. */
   fallback?: boolean;
+  /** SHA-256 hex of `${event}|${term??""}|${description??""}`. Computed at
+   *  build time (build-worker-corpus.mjs) or live-scrape time (corpus.ts)
+   *  and used to look up the row's embedding vector. Stripped from
+   *  find_msu_date JSON-RPC responses to keep the wire shape stable. */
+  contentHash?: string;
 }
 
 /** Result of scraping a single source. */
