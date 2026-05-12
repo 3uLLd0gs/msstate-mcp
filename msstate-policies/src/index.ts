@@ -26,6 +26,11 @@ import { find_msu_date } from "./tools/find_msu_date.js";
 import { get_msu_calendar, indexCalendarRowsForGetter } from "./tools/get_msu_calendar.js";
 import { loadAllCalendarRows } from "./calendars/corpus.js";
 import { indexCalendarRows } from "./calendars/search.js";
+import { search_msu_courses } from "./tools/search_msu_courses.js";
+import { get_msu_course } from "./tools/get_msu_course.js";
+import { get_msu_course_graph } from "./tools/get_msu_course_graph.js";
+import { setCourseCorpus } from "./courses/corpus.js";
+import type { CourseCorpus } from "./courses/types.js";
 import { health_check } from "./tools/health_check.js";
 
 // Deterministic order — referenced in the README and CI smoke test.
@@ -36,6 +41,9 @@ const TOOLS = [
   cite_policy,
   find_msu_date,
   get_msu_calendar,
+  search_msu_courses,
+  get_msu_course,
+  get_msu_course_graph,
   health_check,
 ] as const;
 
@@ -51,6 +59,7 @@ const TOOLS_BY_NAME = new Map<string, ToolDef>(
 // inside a typeof guard avoids ReferenceError without needing `new Function`.
 declare const __VERSION__: string | undefined;
 declare const __GIT_SHA__: string | undefined;
+declare const __COURSE_CORPUS__: CourseCorpus | undefined;
 
 function safeVersion(): string {
   return typeof __VERSION__ !== "undefined" ? __VERSION__ : "";
@@ -58,6 +67,17 @@ function safeVersion(): string {
 
 function safeGitSha(): string {
   return typeof __GIT_SHA__ !== "undefined" ? __GIT_SHA__ : "";
+}
+
+function loadBakedCourseCorpus(): void {
+  if (typeof __COURSE_CORPUS__ !== "undefined" && __COURSE_CORPUS__) {
+    setCourseCorpus(__COURSE_CORPUS__);
+    log("info", "course corpus loaded", {
+      count: Object.keys(__COURSE_CORPUS__.records).length,
+    });
+  } else {
+    log("warn", "no baked course corpus available; course tools will return empty results");
+  }
 }
 
 async function main(): Promise<void> {
@@ -140,6 +160,8 @@ async function main(): Promise<void> {
         err: err instanceof Error ? err.message : String(err),
       });
     });
+
+  loadBakedCourseCorpus();
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
