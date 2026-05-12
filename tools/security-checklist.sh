@@ -322,4 +322,72 @@ else
   note "FAIL" "CAL4 build aborts on calendar WAF/empty" 4
 fi
 
+# ---- v0.5.0: synonym-expansion security checks ------------------------------
+
+# SYN1: No raw Anthropic API key committed. The grep walks the working tree;
+# matches in gitignored files (e.g. a developer's local msstate-policies/.env)
+# are tolerated per the spec's "outside .gitignore allowlist" wording.
+SYN1_HITS=$(grep -rE "sk-ant-[a-zA-Z0-9_-]{20,}" . --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=.wrangler -l 2>/dev/null \
+  | while IFS= read -r f; do
+      if ! git check-ignore -q "$f" 2>/dev/null; then
+        printf '%s\n' "$f"
+      fi
+    done)
+if [ -z "$SYN1_HITS" ]; then
+  score=$((score + 5))
+  note "PASS" "SYN1 no ANTHROPIC_API_KEY committed" 5
+else
+  note "FAIL" "SYN1 sk-ant- pattern found in tracked files: $SYN1_HITS" 5
+fi
+
+# SYN2: Build script aborts on partial paraphrase failure with canonical string.
+if grep -qF "refusing to ship a poisoned calendar corpus" scripts/build-worker-corpus.mjs; then
+  score=$((score + 5))
+  note "PASS" "SYN2 build aborts with canonical string on paraphrase failure" 5
+else
+  note "FAIL" "SYN2 canonical abort string missing from build script" 5
+fi
+
+# SYN3: Build script aborts when ANTHROPIC_API_KEY is unset.
+if grep -qF "ANTHROPIC_API_KEY is required for the build step" scripts/build-worker-corpus.mjs; then
+  score=$((score + 3))
+  note "PASS" "SYN3 build aborts on missing ANTHROPIC_API_KEY" 3
+else
+  note "FAIL" "SYN3 no missing-key guard in build script" 3
+fi
+
+# SYN4: No runtime egress to Anthropic. Only the build script may reference api.anthropic.com.
+RT_ANTHROPIC=$(grep -rn "api\.anthropic\.com" msstate-policies/src worker/src 2>/dev/null | wc -l)
+if [ "$RT_ANTHROPIC" = "0" ]; then
+  score=$((score + 10))
+  note "PASS" "SYN4 zero runtime egress to api.anthropic.com" 10
+else
+  note "FAIL" "SYN4 found $RT_ANTHROPIC runtime references to api.anthropic.com" 10
+fi
+
+# SYN5: Synonym validation visible in build script (length cap or digit-reject regex).
+if grep -qE "PARAPHRASE_MAX_CHARS|\.length > 80|/\\\\d/" scripts/build-worker-corpus.mjs; then
+  score=$((score + 3))
+  note "PASS" "SYN5 paraphrase validation regex/length checks present" 3
+else
+  note "FAIL" "SYN5 no synonym validation in build script" 3
+fi
+
+# SYN6: Tools never reference synonyms.
+TOOLS_SYN=$(grep -rn "synonyms" msstate-policies/src/tools 2>/dev/null | wc -l)
+if [ "$TOOLS_SYN" = "0" ]; then
+  score=$((score + 2))
+  note "PASS" "SYN6 no synonyms references in src/tools/" 2
+else
+  note "FAIL" "SYN6 found $TOOLS_SYN synonyms references in src/tools/" 2
+fi
+
+# CAL5 (regression): Worker CORS allowlist still excludes Authorization.
+if ! grep -nE "Access-Control-Allow-Headers.*Authorization" worker/src/index.ts 2>/dev/null | grep -q .; then
+  score=$((score + 0))
+  note "PASS" "CAL5 Authorization stays out of CORS allowlist" 0
+else
+  note "FAIL" "CAL5 Authorization regressed into CORS allowlist" 0
+fi
+
 echo "$score"
