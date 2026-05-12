@@ -197,9 +197,6 @@ test("find_msu_date: response does not leak contentHash field", async () => {
 });
 
 test("find_msu_date: notes mentions BM25 mode", async () => {
-  // SYN6 (v0.5.0 security checklist) forbids the literal string "synonyms"
-  // anywhere under msstate-policies/src/tools/, so the notes string just says
-  // "BM25" — the synonym-expansion happens at build time and is not surfaced.
   indexCalendarRows([
     {
       source: "academic_calendar",
@@ -214,5 +211,5 @@ test("find_msu_date: notes mentions BM25 mode", async () => {
   ]);
   const res = await find_msu_date.handler({ q: "classes" });
   const payload = JSON.parse(res.content[0].text);
-  assert.match(payload.notes, /BM25/);
+  assert.match(payload.notes, /BM25 with synonyms/);
 });

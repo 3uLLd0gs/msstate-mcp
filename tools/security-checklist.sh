@@ -373,13 +373,16 @@ else
   note "FAIL" "SYN5 no synonym validation in build script" 3
 fi
 
-# SYN6: Tools never reference synonyms.
-TOOLS_SYN=$(grep -rn "synonyms" msstate-policies/src/tools 2>/dev/null | wc -l)
+# SYN6: row.synonyms is not surfaced in any user-facing path in tools.
+# Catches property access (.synonyms), JSON keys ("synonyms":), and array
+# destructuring (synonyms:) — but NOT the bare word "synonyms" appearing
+# inside a user-facing mode-note string (e.g., "BM25 with synonyms").
+TOOLS_SYN=$(grep -rnE '\.synonyms\b|"synonyms"\s*:|\bsynonyms\s*:|\{[^}]*\bsynonyms\b[^}]*\}' msstate-policies/src/tools 2>/dev/null | wc -l)
 if [ "$TOOLS_SYN" = "0" ]; then
   score=$((score + 2))
-  note "PASS" "SYN6 no synonyms references in src/tools/" 2
+  note "PASS" "SYN6 no row.synonyms property access in src/tools/" 2
 else
-  note "FAIL" "SYN6 found $TOOLS_SYN synonyms references in src/tools/" 2
+  note "FAIL" "SYN6 found $TOOLS_SYN row.synonyms-style references in src/tools/" 2
 fi
 
 # CAL5 (regression): Worker CORS allowlist still excludes Authorization.

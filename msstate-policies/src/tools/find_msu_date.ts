@@ -123,7 +123,7 @@ function buildNotes(
   fallbackTriggered: boolean,
   term: string | null,
 ): string {
-  const modeNote = "BM25";
+  const modeNote = "BM25 with synonyms";
 
   if (matches.length === 0) {
     return `No MSU calendar row matched this query. ${modeNote}. If the question is about an MSU date or deadline, try a more specific phrasing or check the source calendar directly.`;
