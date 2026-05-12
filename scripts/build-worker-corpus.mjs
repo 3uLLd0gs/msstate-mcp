@@ -419,6 +419,23 @@ async function main() {
     built_at: builtAt,
   };
 
+  // Sanity guard: registrar term pages must yield at least one multi-day row.
+  // If the extractor regresses to single-day-only, abort the build instead of
+  // silently shipping a poisoned corpus. See .dev/specs/2026-05-12-...md.
+  const multiDayCount = calendarPayload.rows.filter(
+    (r) =>
+      (r.source === "academic_calendar" || r.source === "sfa_financial_aid") &&
+      r.start !== r.end,
+  ).length;
+  if (multiDayCount === 0) {
+    throw new Error(
+      "refusing to ship a calendar corpus with zero multi-day ranges",
+    );
+  }
+  console.error(
+    `[build-worker-corpus]   academic_calendar+sfa multi-day rows: ${multiDayCount}`,
+  );
+
   const coursesPayload = await scrapeCatalogViaSubprocess();
   out.courses = {
     version: coursesPayload.version,
