@@ -1113,7 +1113,7 @@ export default {
                 mcp: "POST /mcp (JSON-RPC 2.0)",
                 health: "GET /health",
               },
-              repo: "https://github.com/mminsub11/msstate-mcp",
+              repo: "https://github.com/3uLLd0gs/msstate-mcp",
               note: "Unofficial. Verify against the official source at policies.msstate.edu.",
             },
             null,

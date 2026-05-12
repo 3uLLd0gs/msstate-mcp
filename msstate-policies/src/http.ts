@@ -12,7 +12,7 @@ import { log } from "./log.js";
 import { WAFChallengeError } from "./types.js";
 
 const USER_AGENT =
-  "msstate-policies-mcp/0.1.0 (+https://github.com/mminsub11/msstate-mcp; node)";
+  "msstate-policies-mcp/0.1.0 (+https://github.com/3uLLd0gs/msstate-mcp; node)";
 
 const MAX_CONCURRENT = 4;
 const MAX_RETRIES = 3;

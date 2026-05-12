@@ -68,7 +68,7 @@ Same flow as claude.ai. Free-tier ChatGPT can't add connectors — use the [Open
 ### Claude Code
 
 ```bash
-/plugin marketplace add mminsub11/msstate-mcp
+/plugin marketplace add 3uLLd0gs/msstate-mcp
 /plugin install msstate-policies@msstate-mcp
 ```
 
@@ -159,7 +159,7 @@ Runnable version at [`examples/openai_api_sample.py`](examples/openai_api_sample
 
 Free claude.ai can't add MCP connectors, so use a curated **starter zip** of 22 high-traffic policy PDFs with a system-prompt template. Policies only (calendars + courses change too often for a static drop).
 
-1. Download `msstate-policies-starter.zip` from the [latest release](https://github.com/mminsub11/msstate-mcp/releases/latest)
+1. Download `msstate-policies-starter.zip` from the [latest release](https://github.com/3uLLd0gs/msstate-mcp/releases/latest)
 2. Sign in at <https://claude.ai>, create a **Project**
 3. Unzip and drag the PDFs + `SYSTEM_PROMPT.txt` into the Project's knowledge area
 4. Ask policy questions inside that Project
@@ -296,7 +296,7 @@ Full eval artifacts live in [`msstate-policies/eval/`](msstate-policies/eval/). 
 - **Security disclosure + out-of-scope abuse classes** — [`SECURITY.md`](SECURITY.md)
 - **In-progress design specs and plans** live under `.dev/` (visible in the repo, de-emphasized via the leading-dot convention). See `.dev/README.md`.
 
-Issues and PRs welcome at <https://github.com/mminsub11/msstate-mcp>.
+Issues and PRs welcome at <https://github.com/3uLLd0gs/msstate-mcp>.
 
 ---
 

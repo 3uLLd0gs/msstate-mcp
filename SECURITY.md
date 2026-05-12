@@ -8,8 +8,8 @@ If you find a security issue in `msstate-mcp` or the deployed Cloudflare Worker 
 
 **How to report:**
 
-- **Preferred:** open a [private security advisory](https://github.com/mminsub11/msstate-mcp/security/advisories/new) on GitHub. This keeps the report off public issue trackers until a fix is published.
-- **Alternative:** email the maintainer through the email listed on the [GitHub profile](https://github.com/mminsub11), with `[msstate-mcp security]` in the subject line.
+- **Preferred:** open a [private security advisory](https://github.com/3uLLd0gs/msstate-mcp/security/advisories/new) on GitHub. This keeps the report off public issue trackers until a fix is published.
+- **Alternative:** email the maintainer through the email listed on the [GitHub profile](https://github.com/3uLLd0gs), with `[msstate-mcp security]` in the subject line.
 
 **Please include:**
 
