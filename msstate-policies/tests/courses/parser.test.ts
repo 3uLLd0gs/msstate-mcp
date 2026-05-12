@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { parsePrereqProse } from "../../src/courses/parser.js";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { parsePrereqProse, parseCourseHtml } from "../../src/courses/parser.js";
+
+function fixture(name: string): string {
+  return readFileSync(
+    resolve(__dirname, "..", "fixtures", "courses", name),
+    "utf8",
+  );
+}
 
 describe("parsePrereqProse — Pass 1 (lossless course codes)", () => {
   it("returns null for empty input", () => {
@@ -76,5 +85,51 @@ describe("parsePrereqProse — Pass 1 (lossless course codes)", () => {
     expect(
       parsePrereqProse("(Corequisites: CSE 1284). Three hours."),
     ).toBeNull();
+  });
+});
+
+describe("parseCourseHtml", () => {
+  it("extracts code/title/hours from CSE 4153 fixture", () => {
+    const c = parseCourseHtml(fixture("cse-4153.html"), "CSE 4153")!;
+    expect(c.code).toBe("CSE 4153");
+    expect(c.title).toMatch(/Data Communications|Computer Networks/i);
+    expect(c.hours).toBe(3);
+    expect(c.level).toBe("undergraduate");
+    expect(c.source_url).toBe("https://catalog.msstate.edu/search/?P=CSE%204153");
+  });
+
+  it("extracts prereqs for CSE 4153", () => {
+    const c = parseCourseHtml(fixture("cse-4153.html"), "CSE 4153")!;
+    expect(c.prereqs).not.toBeNull();
+    expect(c.prereqs!.required_courses).toEqual(
+      expect.arrayContaining(["CSE 3724", "ECE 3724"]),
+    );
+    expect(c.prereqs!.raw_prose).toMatch(/Prerequisites/);
+  });
+
+  it("returns null for an unknown course (HTML 200 but no result card)", () => {
+    // Use any HTML that does NOT contain a searchresult article.
+    const empty = "<html><body><p>nothing here</p></body></html>";
+    expect(parseCourseHtml(empty, "ZZ 9999")).toBeNull();
+  });
+
+  it("CSE 1284 has no prereqs (or only a non-course condition)", () => {
+    const c = parseCourseHtml(fixture("cse-1284.html"), "CSE 1284")!;
+    // Either null prereqs, or required_courses === [] with non_course populated.
+    if (c.prereqs) {
+      expect(c.prereqs.required_courses).toEqual([]);
+    }
+  });
+
+  it("hours field handles range strings like '0,4' as a string", () => {
+    // Synthetic minimal fixture covering ranged-hours markup — none of the
+    // current live fixtures (CSE 1284/4153/4733) publish a ranged value.
+    const syntheticRanged = `<article class="searchresult search-pageresult">
+      <h2 class="hours">0,4 Hours.</h2>
+      <h2 class="title">EX 9999. <span class="title">Example Ranged.</span></h2>
+      <div class="courseblockdesc"><p>(Prerequisites: EX 1000). Description.</p></div>
+    </article>`;
+    const c = parseCourseHtml(syntheticRanged, "EX 9999")!;
+    expect(typeof c.hours === "string" ? c.hours : String(c.hours)).toBe("0,4");
   });
 });

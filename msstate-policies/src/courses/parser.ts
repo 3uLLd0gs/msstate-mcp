@@ -9,7 +9,8 @@
  *   Pass 2 (best-effort): infer logic / min_grade / non_course phrases.
  *   When uncertain, set logic="mixed" and rely on raw_prose verbatim.
  */
-import type { Prereq } from "./types.js";
+import { load as cheerioLoad } from "cheerio";
+import { COURSE_CODE_RE, type Course, type Prereq } from "./types.js";
 
 const COURSE_TOKEN_RE = /\b[A-Z]{2,4}\s\d{4}\b/g;
 const NON_COURSE_PATTERNS: Array<{ rx: RegExp; label: (m: RegExpExecArray) => string }> = [
@@ -103,4 +104,106 @@ export function parsePrereqProse(input: string | null | undefined): Prereq | nul
 
 export function parseCoreqProse(input: string | null | undefined): Prereq | null {
   return parseClause("Corequisites", input ?? "");
+}
+
+const CROSS_LIST_RE = /\bcross[- ]listed\s+with\s+([A-Z]{2,4}\s\d{4}(?:\s*,\s*[A-Z]{2,4}\s\d{4})*)/i;
+const SEMESTER_RE = /\b(?:Offered\s+in|Offered\s*[:\-])\s*([FSpSuW][\w,\s./]+?)(?:\.|\)|$)/i;
+
+function deriveSourceUrl(code: string): string {
+  const [dept, num] = code.split(/\s+/);
+  return `https://catalog.msstate.edu/search/?P=${encodeURIComponent(dept)}%20${num}`;
+}
+
+function deriveLevel(code: string): "undergraduate" | "graduate" {
+  // MSU convention: first digit of the 4-digit course number signals level.
+  // 1xxx–4xxx = undergraduate; 5xxx+ = graduate.
+  const num = parseInt(code.split(/\s+/)[1], 10);
+  return num >= 5000 ? "graduate" : "undergraduate";
+}
+
+function parseHours(raw: string): number | string {
+  const trimmed = raw.trim().replace(/Hours?\.?$/i, "").trim();
+  if (/^\d+$/.test(trimmed)) return parseInt(trimmed, 10);
+  return trimmed; // "3-4", "0,4", "Var." → preserve as string
+}
+
+/**
+ * Parse a `/search/?P=<code>` page into a Course record.
+ *
+ * Supports two CourseLeaf markup shapes seen on catalog.msstate.edu:
+ *  - LIVE shape: `<article class="searchresult search-courseresult">` with
+ *    a single `<h3>` containing "CODE  Title:  N hours." and a sibling
+ *    `<p class="courseblockdesc">` with the description.
+ *  - LEGACY/SYNTHETIC shape (kept for fixture-based unit tests): separate
+ *    `<h2 class="hours">` and `<h2 class="title">` elements.
+ *
+ * Returns null when the input is not a recognizable result card. Callers
+ * MUST treat null as "course not in catalog" (Course = 404).
+ */
+export function parseCourseHtml(html: string, expectedCode: string): Course | null {
+  if (!COURSE_CODE_RE.test(expectedCode)) return null;
+  const $ = cheerioLoad(html);
+
+  // Prefer the real CourseLeaf course-result; fall back to the generic
+  // searchresult article (covers synthetic test fixtures).
+  let card = $("article.searchresult.search-courseresult").first();
+  if (card.length === 0) {
+    card = $("article.searchresult").first();
+  }
+  if (card.length === 0) return null;
+
+  const descRaw = card.find("p.courseblockdesc, .courseblockdesc").first().text().trim();
+
+  // Live markup combines code+title+hours in a single <h3>:
+  //   "CSE 4153  Data Communications and Computer Networks:  3 hours."
+  // Synthetic fixtures use separate h2.hours and h2.title.
+  let title = "";
+  let hoursRaw = "";
+
+  const h3Header = card.find("h3").first().text().trim();
+  const combinedRe = new RegExp(
+    `^${expectedCode.replace(/\s+/g, "\\s+")}\\s+(.+?)\\s*:\\s*([\\d.,\\-\\sA-Za-z]+?Hours?\\.?)\\s*$`,
+    "i",
+  );
+  const combinedMatch = h3Header.match(combinedRe);
+  if (combinedMatch) {
+    title = combinedMatch[1].trim();
+    hoursRaw = combinedMatch[2].trim();
+  } else {
+    // Fall back to separate h2.hours / h2.title selectors (synthetic shape).
+    hoursRaw = card.find("h2.hours, .hours").first().text().trim();
+    const titleRaw = card.find("h2.title, .title").first().text().trim();
+    const codePrefixRe = new RegExp(
+      `^${expectedCode.replace(/\s+/g, "\\s+")}\\.?\\s*`,
+      "i",
+    );
+    title = titleRaw.replace(codePrefixRe, "").replace(/\s+/g, " ").trim();
+  }
+
+  const prereqs = parsePrereqProse(descRaw);
+  const coreqs = parseCoreqProse(descRaw);
+
+  const crossMatch = descRaw.match(CROSS_LIST_RE);
+  const cross_listed = crossMatch
+    ? crossMatch[1]
+        .split(/\s*,\s*/)
+        .map((s) => s.trim())
+        .filter((s) => COURSE_CODE_RE.test(s) && s !== expectedCode)
+    : [];
+
+  const semMatch = descRaw.match(SEMESTER_RE);
+  const semester_offered = semMatch ? semMatch[1].trim() : null;
+
+  return {
+    code: expectedCode,
+    title,
+    hours: parseHours(hoursRaw),
+    level: deriveLevel(expectedCode),
+    description: descRaw,
+    semester_offered,
+    prereqs,
+    coreqs,
+    cross_listed,
+    source_url: deriveSourceUrl(expectedCode),
+  };
 }
