@@ -14,6 +14,10 @@ afterEach(() => {
   else process.env.VOYAGE_API_KEY = ORIGINAL_KEY;
 });
 
+// Each test uses a unique query string so the module-level LRU (which
+// persists across tests because tsx caches the transpiled module) doesn't
+// leak a cached vector from one test into another.
+
 test("embedQuery: returns Float32Array(512) on successful response", async () => {
   globalThis.fetch = (async () =>
     new Response(
@@ -24,7 +28,7 @@ test("embedQuery: returns Float32Array(512) on successful response", async () =>
     )) as typeof fetch;
 
   const { embedQuery } = await import("../src/calendars/embed.js?fresh-1");
-  const v = await embedQuery("test query");
+  const v = await embedQuery("test query 1 — happy path");
   assert.ok(v instanceof Float32Array);
   assert.equal(v!.length, 512);
 });
@@ -32,7 +36,7 @@ test("embedQuery: returns Float32Array(512) on successful response", async () =>
 test("embedQuery: returns null when VOYAGE_API_KEY is unset", async () => {
   delete process.env.VOYAGE_API_KEY;
   const { embedQuery } = await import("../src/calendars/embed.js?fresh-2");
-  const v = await embedQuery("test query");
+  const v = await embedQuery("test query 2 — no key");
   assert.equal(v, null);
 });
 
@@ -41,7 +45,7 @@ test("embedQuery: returns null on fetch failure (network error)", async () => {
     throw new Error("simulated network failure");
   }) as typeof fetch;
   const { embedQuery } = await import("../src/calendars/embed.js?fresh-3");
-  const v = await embedQuery("test query");
+  const v = await embedQuery("test query 3 — network error");
   assert.equal(v, null);
 });
 
@@ -49,7 +53,7 @@ test("embedQuery: returns null on non-200 response", async () => {
   globalThis.fetch = (async () =>
     new Response(JSON.stringify({ error: "rate limit" }), { status: 429 })) as typeof fetch;
   const { embedQuery } = await import("../src/calendars/embed.js?fresh-4");
-  const v = await embedQuery("test query");
+  const v = await embedQuery("test query 4 — 429");
   assert.equal(v, null);
 });
 
@@ -57,7 +61,7 @@ test("embedQuery: never throws even on malformed response", async () => {
   globalThis.fetch = (async () =>
     new Response("not json", { status: 200 })) as typeof fetch;
   const { embedQuery } = await import("../src/calendars/embed.js?fresh-5");
-  const v = await embedQuery("test query");
+  const v = await embedQuery("test query 5 — malformed");
   assert.equal(v, null);
 });
 
@@ -81,11 +85,11 @@ test("embedQuery: caches identical queries via LRU", async () => {
 test("isEmbeddingAvailable: false when no key", async () => {
   delete process.env.VOYAGE_API_KEY;
   const { isEmbeddingAvailable } = await import("../src/calendars/embed.js?fresh-7");
-  assert.equal(isEmbeddingAvailable, false);
+  assert.equal(isEmbeddingAvailable(), false);
 });
 
 test("isEmbeddingAvailable: true when key set", async () => {
   process.env.VOYAGE_API_KEY = "vo-anything";
   const { isEmbeddingAvailable } = await import("../src/calendars/embed.js?fresh-8");
-  assert.equal(isEmbeddingAvailable, true);
+  assert.equal(isEmbeddingAvailable(), true);
 });

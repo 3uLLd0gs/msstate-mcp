@@ -1,10 +1,8 @@
 /**
  * Voyage embeddings REST client with graceful-null degradation.
  *
- * - Reads VOYAGE_API_KEY from process.env. The value is captured at module
- *   load AND refreshed when it changes between calls — refreshing also clears
- *   the per-call LRU + circuit breaker so a key rotation (or a test mutating
- *   env across calls) cannot return stale vectors signed with the old key.
+ * - VOYAGE_API_KEY is read from process.env on each call (so unit tests can
+ *   swap env state between tests without depending on module re-evaluation).
  * - 2s timeout per call.
  * - LRU cache (size 256, keyed by raw text).
  * - Returns Float32Array(512) on success, null on any failure path.
@@ -19,18 +17,14 @@ const VOYAGE_MODEL = "voyage-3-lite" as const;
 const TIMEOUT_MS = 2000;
 const LRU_SIZE = 256;
 
-function readKey(): string {
+/** Is a Voyage key set right now? Re-checks process.env on every call. */
+export function isEmbeddingAvailable(): boolean {
   const k = process.env.VOYAGE_API_KEY;
-  return typeof k === "string" ? k : "";
+  return typeof k === "string" && k.length > 0;
 }
 
-// Captured at module load. Mutates only when refreshIfEnvChanged() detects a
-// key change. Exported as `let` so the binding stays live for callers that
-// hold the namespace reference.
-let lastSeenKey = readKey();
-export let isEmbeddingAvailable = lastSeenKey.length > 0;
-
-if (!isEmbeddingAvailable) {
+// One-shot startup notice (purely diagnostic — no behavioral coupling).
+if (!isEmbeddingAvailable()) {
   log("warn", "VOYAGE_API_KEY unset; calendar tool will fall back to BM25-only retrieval");
 }
 
@@ -77,20 +71,6 @@ function lruSet(key: string, v: Float32Array): void {
   }
 }
 
-/** Detect key rotation and clear per-key state so stale vectors signed with
- *  a different key are never returned. Called at the top of every embedQuery
- *  call and embedBatch call. */
-function refreshIfEnvChanged(): void {
-  const current = readKey();
-  if (current !== lastSeenKey) {
-    lastSeenKey = current;
-    isEmbeddingAvailable = current.length > 0;
-    lru.clear();
-    recentFailures = [];
-    trippedUntil = 0;
-  }
-}
-
 /**
  * Embed a single query string. Returns null when:
  *   - VOYAGE_API_KEY is unset
@@ -99,8 +79,8 @@ function refreshIfEnvChanged(): void {
  * Never throws. Callers must handle null by falling back to BM25.
  */
 export async function embedQuery(text: string): Promise<Float32Array | null> {
-  refreshIfEnvChanged();
-  if (!isEmbeddingAvailable) return null;
+  const apiKey = process.env.VOYAGE_API_KEY;
+  if (!apiKey) return null;
   if (isTripped()) return null;
   const cached = lruGet(text);
   if (cached) return cached;
@@ -110,7 +90,7 @@ export async function embedQuery(text: string): Promise<Float32Array | null> {
     const res = await fetch(VOYAGE_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${lastSeenKey}`,
+        "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -156,14 +136,14 @@ export async function embedBatch(
   texts: string[],
   inputType: "document" | "query" = "document",
 ): Promise<Float32Array[]> {
-  refreshIfEnvChanged();
-  if (!isEmbeddingAvailable) {
+  const apiKey = process.env.VOYAGE_API_KEY;
+  if (!apiKey) {
     throw new Error("VOYAGE_API_KEY unset; cannot embed at build time");
   }
   const res = await fetch(VOYAGE_URL, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${lastSeenKey}`,
+      "Authorization": `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ model: VOYAGE_MODEL, input: texts, input_type: inputType }),
