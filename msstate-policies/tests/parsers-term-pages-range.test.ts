@@ -62,3 +62,31 @@ test("parseTermPage: academic_calendar handles cross-month ranges", () => {
   assert.ok(gradApp, "expected a Jan-28-start graduation-application window");
   assert.equal(gradApp!.end, "2026-03-27");
 });
+
+test("parseTermPage: out-of-order end date falls back to single-day", () => {
+  // Synthetic HTML: end (2026-03-05) precedes start (2026-03-09). The extractor
+  // must drop the bad end and keep start == end. This guards against silent
+  // corruption if MSU's HTML ever ships a malformed range.
+  const html = `<!doctype html><html><body>
+    <div class="row g-0 border-bottom">
+      <div class="col col-md-4">
+        <div class="card-body py-4">
+          <time datetime="2026-03-09T12:00:00Z">March 9</time>
+ to</br><time datetime="2026-03-05T12:00:00Z">March 5</time>
+        </div>
+      </div>
+      <div class="col col-md-8">
+        <div class="card-body py-4">Broken Event</div>
+      </div>
+    </div>
+  </body></html>`;
+
+  const rows = parseTermPage(html, "academic_calendar", {
+    url: "https://www.registrar.msstate.edu/calendars/academic-calendar/2026/spring",
+    year: 2026,
+    term: "Spring",
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].start, "2026-03-09");
+  assert.equal(rows[0].end, "2026-03-09", "out-of-order end must be dropped, not used");
+});
