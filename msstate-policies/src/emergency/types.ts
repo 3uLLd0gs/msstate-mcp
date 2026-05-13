@@ -27,7 +27,7 @@ export const EXPECTED_GUIDELINE_SLUGS: readonly string[] = Object.freeze([
   "winter-weather",
 ]);
 
-export const EMERGENCY_ALIASES: Record<string, string> = {
+export const EMERGENCY_ALIASES: Readonly<Record<string, string>> = Object.freeze({
   "tornado":             "severe-weather-tornado",
   "severe weather":      "severe-weather-tornado",
   "thunderstorm":        "severe-weather-tornado",
@@ -52,7 +52,7 @@ export const EMERGENCY_ALIASES: Record<string, string> = {
   "suspicious package":  "suspicious-devices-substances",
   "prepare":             "preparedness",
   "preparation":         "preparedness",
-};
+});
 
 export const MANDATORY_DISCLAIMER =
   "If this is a life-threatening emergency, call 911 now (or MSU PD at 662-325-2121).";

@@ -21,6 +21,9 @@ describe("emergency/types", () => {
     assert.ok(EXPECTED_GUIDELINE_SLUGS.includes("severe-weather-tornado"));
     assert.ok(EXPECTED_GUIDELINE_SLUGS.includes("violence-threats-of-violence"));
   });
+  test("EMERGENCY_ALIASES is frozen", () => {
+    assert.ok(Object.isFrozen(EMERGENCY_ALIASES));
+  });
   test("EMERGENCY_ALIASES values all map to EXPECTED_GUIDELINE_SLUGS", () => {
     for (const slug of Object.values(EMERGENCY_ALIASES)) {
       assert.ok(EXPECTED_GUIDELINE_SLUGS.includes(slug), `unknown slug: ${slug}`);
