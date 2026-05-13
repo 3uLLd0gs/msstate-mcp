@@ -1,5 +1,16 @@
 import { load as cheerioLoad } from "cheerio";
-import type { FaqRow, FeeRow, FeeKind } from "./types.js";
+import type {
+  FaqRow,
+  FeeRow,
+  FeeKind,
+  TuitionRateRow,
+  CampusSlug,
+  Level,
+  Term,
+  CreditHourBucket,
+  Residency,
+  LineItem,
+} from "./types.js";
 
 const RETRIEVED_AT_PLACEHOLDER = "1970-01-01T00:00:00.000Z";
 
@@ -181,6 +192,189 @@ export function parseFeesHtml(html: string, pageUrl: string): FeeRow[] {
         });
       });
   });
+
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Controller-campus rate-table parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive Term from a heading string extracted from the table's <thead> <p>.
+ */
+function classifyTerm(heading: string): Term | null {
+  const lc = heading.toLowerCase();
+  if (/fall.*spring|spring.*fall|fall .+\d+.*spring|spring .+\d+.*fall/i.test(heading)) {
+    return "fall_spring";
+  }
+  if (/fall/i.test(lc)) return "fall_spring";
+  if (/spring/i.test(lc) && !/summer/i.test(lc)) return "fall_spring";
+  if (/winter/i.test(lc)) return "winter";
+  if (/summer/i.test(lc)) return "summer";
+  return null;
+}
+
+/**
+ * Derive CreditHourBucket from the bucket-descriptor cell (first <tbody> row,
+ * first column). Examples:
+ *   "Per-Credit-Hour Cost: 1 - 11 Hours"
+ *   "Per Semester Cost: 12 - 16 Hours"
+ *   "Per-Credit-Hour Cost: 1 - 8 Hours"
+ *   "Per Semester Cost: 9 or More Hours"
+ *   "Per-Credit-Hour Cost"               (no explicit bucket — winter/summer)
+ */
+function classifyBucket(descriptor: string): CreditHourBucket | null {
+  const lc = descriptor.toLowerCase();
+  if (/1\s*-\s*11\b/.test(lc)) return "1-11";
+  if (/12\s*-\s*16\b/.test(lc) || /12\+|12 or more/.test(lc)) return "12-16";
+  if (/1\s*-\s*8\b/.test(lc)) return "1-8";
+  if (/9\s*or\s*more|9\s*\+/.test(lc)) return "9+";
+  return null;
+}
+
+/**
+ * Parse a controller.msstate.edu campus rate page.
+ *
+ * Page structure (Bootstrap tab-pane per level):
+ *   div.tab-pane[id="pane--undergraduate-rates"] -> undergrad tables
+ *   div.tab-pane[id="pane--graduate-rates"]       -> grad tables  (absent for mgccc)
+ *
+ * Each <table> inside a pane:
+ *   <thead><tr><th colspan="3"><p ...>Fall 2026 or Spring 2027</p></th></tr></thead>
+ *   <tbody>
+ *     <tr>                                        <- descriptor/header row
+ *       <td><b>Per-Credit-Hour Cost: 1 - 11 Hours</b></td>
+ *       <td>Resident</td>
+ *       <td>Non-Resident</td>
+ *     </tr>
+ *     <tr><td>Tuition & Required Fees</td><td>$452.00</td><td>$452.00</td></tr>
+ *     ...
+ *     <tr><td>Total Fee (Per Credit Hour)</td><td>$458.25</td><td>$1,249.75</td></tr>
+ *   </tbody>
+ *
+ * Some tables (second one in a pair) have an empty <thead> — they inherit
+ * the term from the most-recent table that had a non-empty <thead> in
+ * the same pane.
+ *
+ * Column indices: label=0, resident=1, non_resident=2 (confirmed across all
+ * fixtures — the column-header row is the first tbody row, not thead).
+ */
+export function parseControllerRateHtml(
+  html: string,
+  campus: CampusSlug,
+  pageUrl: string,
+): TuitionRateRow[] {
+  const $ = cheerioLoad(html);
+  const out: TuitionRateRow[] = [];
+
+  const LEVEL_PANE_IDS: Array<[string, Level]> = [
+    ["pane--undergraduate-rates", "undergrad"],
+    ["pane--graduate-rates", "grad"],
+  ];
+
+  for (const [paneId, level] of LEVEL_PANE_IDS) {
+    const $pane = $(`#${paneId}`);
+    if (!$pane.length) continue;
+
+    let currentTerm: Term | null = null;
+    let currentEffectiveTerm = "";
+
+    $pane.find("table").each((_, table) => {
+      const $table = $(table);
+
+      // Extract term label from <thead> <p> (may be absent on paired tables).
+      const theadText = $table.find("thead p").first().text().replace(/\s+/g, " ").trim();
+      if (theadText.length > 0) {
+        const derived = classifyTerm(theadText);
+        if (derived !== null) {
+          currentTerm = derived;
+          currentEffectiveTerm = theadText;
+        }
+      }
+
+      if (!currentTerm) return; // skip tables before we've seen a term heading
+
+      const rows = $table.find("tbody tr").toArray();
+      if (rows.length < 2) return; // need at least descriptor row + one data row
+
+      // First tbody row: bucket descriptor + column headers (Resident / Non-Resident)
+      const descriptorCells = $(rows[0])
+        .find("td, th")
+        .map((_, c) => $(c).text().trim())
+        .get();
+      if (descriptorCells.length < 3) return;
+
+      const bucketDescriptor = descriptorCells[0];
+      const bucket = classifyBucket(bucketDescriptor);
+
+      // Verify the header cells look like resident / non-resident.
+      const col1 = descriptorCells[1].toLowerCase();
+      const col2 = descriptorCells[2].toLowerCase();
+      const residentIdx = /^resident/.test(col1) ? 1 : /^resident/.test(col2) ? 2 : -1;
+      const nonResidentIdx = /non.?resident/.test(col2) ? 2 : /non.?resident/.test(col1) ? 1 : -1;
+      if (residentIdx < 0 || nonResidentIdx < 0) return;
+
+      const residentItems: LineItem[] = [];
+      const nonResidentItems: LineItem[] = [];
+      let residentTotal: number | null = null;
+      let nonResidentTotal: number | null = null;
+
+      for (let i = 1; i < rows.length; i++) {
+        const cells = $(rows[i])
+          .find("td, th")
+          .map((_, c) => $(c).text().trim())
+          .get();
+        if (cells.length < 3) continue;
+
+        const label = cells[0].replace(/ /g, " ").trim();
+        if (!label) continue;
+
+        const resAmt = parseMoney(cells[residentIdx]);
+        const nonResAmt = parseMoney(cells[nonResidentIdx]);
+        const isTotal = /total/i.test(label);
+
+        if (isTotal) {
+          residentTotal = resAmt;
+          nonResidentTotal = nonResAmt;
+        } else {
+          if (resAmt !== null) residentItems.push({ label, amount_usd: resAmt });
+          if (nonResAmt !== null) nonResidentItems.push({ label, amount_usd: nonResAmt });
+        }
+      }
+
+      // Fall back to summing line items if no explicit Total row was found.
+      if (residentTotal === null && residentItems.length > 0) {
+        residentTotal = residentItems.reduce((s, li) => s + li.amount_usd, 0);
+      }
+      if (nonResidentTotal === null && nonResidentItems.length > 0) {
+        nonResidentTotal = nonResidentItems.reduce((s, li) => s + li.amount_usd, 0);
+      }
+
+      const push = (residency: Residency, total: number, items: LineItem[]) => {
+        out.push({
+          campus,
+          level,
+          residency,
+          term: currentTerm!,
+          rate_basis: "per_credit_hour",
+          credit_hour_bucket: bucket,
+          amount_usd: total,
+          line_items: items,
+          effective_term: currentEffectiveTerm,
+          source_url: pageUrl,
+          retrieved_at: RETRIEVED_AT_PLACEHOLDER,
+        });
+      };
+
+      if (residentTotal !== null && residentTotal > 0) {
+        push("resident", residentTotal, residentItems);
+      }
+      if (nonResidentTotal !== null && nonResidentTotal > 0) {
+        push("non_resident", nonResidentTotal, nonResidentItems);
+      }
+    });
+  }
 
   return out;
 }
