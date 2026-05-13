@@ -41,6 +41,7 @@ interface CacheEntry {
   rows: CalendarRow[];
   expiresAt: number;
   error: string | null;
+  warnings: string[];
   // last successful rows, kept even if the most recent attempt errored
   lastGoodRows: CalendarRow[];
   lastGoodAt: number | null;
@@ -121,7 +122,7 @@ export async function loadCalendarSource(source: CalendarSource): Promise<Scrape
   const now = Date.now();
   const hit = cache.get(source);
   if (hit && hit.expiresAt > now) {
-    return { source, rows: hit.rows, error: hit.error };
+    return { source, rows: hit.rows, error: hit.error, warnings: hit.warnings.length > 0 ? hit.warnings : undefined };
   }
   const result = await scraperImpl(source);
   const wasError = result.error !== null;
@@ -130,6 +131,7 @@ export async function loadCalendarSource(source: CalendarSource): Promise<Scrape
     ? {
         rows: lkg, // serve last-known-good on transient error
         error: result.error,
+        warnings: result.warnings ?? [],
         expiresAt: now + NEGATIVE_TTL_MS,
         lastGoodRows: lkg,
         lastGoodAt: hit?.lastGoodAt ?? null,
@@ -137,6 +139,7 @@ export async function loadCalendarSource(source: CalendarSource): Promise<Scrape
     : {
         rows: result.rows,
         error: null,
+        warnings: result.warnings ?? [],
         expiresAt: now + ttlMsFor(source),
         lastGoodRows: result.rows,
         lastGoodAt: now,
@@ -145,18 +148,19 @@ export async function loadCalendarSource(source: CalendarSource): Promise<Scrape
   if (wasError) {
     log("warn", "calendar source scrape error (serving LKG)", { source, error: result.error, lkg_count: lkg.length });
   }
-  return { source, rows: entry.rows, error: entry.error };
+  return { source, rows: entry.rows, error: entry.error, warnings: entry.warnings.length > 0 ? entry.warnings : undefined };
 }
 
 export function getCalendarsCorpusHealth(): {
-  per_source: Record<string, { row_count: number; error: string | null }>;
+  per_source: Record<string, { row_count: number; error: string | null; warnings: string[] }>;
 } {
-  const per_source: Record<string, { row_count: number; error: string | null }> = {};
+  const per_source: Record<string, { row_count: number; error: string | null; warnings: string[] }> = {};
   for (const source of CALENDAR_SOURCES) {
     const entry = cache.get(source);
     per_source[source] = {
       row_count: entry?.rows.length ?? 0,
       error: entry?.error ?? null,
+      warnings: entry?.warnings ?? [],
     };
   }
   return { per_source };

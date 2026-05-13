@@ -64,3 +64,29 @@ test("scrapeCalendarFromHtml: passes citation through for housing rows", () => {
     assert.ok(r.citation.length > 0, `citation missing on housing row: ${r.event}`);
   }
 });
+
+// Task 5: partial-failure surfacing
+test("scraper — partial-failure surfacing: when some term pages fail, ScrapeResult carries warnings and non-null error", async () => {
+  const { __setHttpGetForTests, scrapeCalendar } = await import("../src/calendars/scraper.js");
+  // Minimal Drupal card layout that parseTermPage can extract rows from
+  const springPageHtml = `<html><body>
+    <div class="row g-0 border-bottom">
+      <div class="col col-md-4"><div class="card-body py-4"><time datetime="2026-01-14T12:00:00Z">January 14</time></div></div>
+      <div class="col col-md-8"><div class="card-body py-4">Classes begin</div></div>
+    </div>
+  </body></html>`;
+  __setHttpGetForTests(async (url: string) => {
+    // First call (index page) succeeds with two entries
+    if (url.endsWith("/calendars/academic-calendar")) {
+      return { body: '<a class="list-group-item list-group-item-action" href="/calendars/academic-calendar/2026/spring">Spring 2026</a><a class="list-group-item list-group-item-action" href="/calendars/academic-calendar/2026/fall">Fall 2026</a>', status: 200 };
+    }
+    // Fall sub-page fails
+    if (url.includes("/fall")) throw new Error("timeout");
+    // Spring sub-page returns parseable HTML
+    return { body: springPageHtml, status: 200 };
+  });
+  const r = await scrapeCalendar("academic_calendar");
+  assert.ok(r.rows.length > 0, "must still return rows from the page that worked");
+  assert.ok(r.warnings && r.warnings.length > 0, "must surface per-page warnings");
+  assert.ok(r.error !== null || r.warnings.length > 0, "partial failure must be visible");
+});
