@@ -444,4 +444,46 @@ else
   note "FAIL" "CAT4 CATALOG_ROOTS allowlist missing or not frozen" 2
 fi
 
+# ---- v0.7.0: emergency-guideline security checks ---------------------------
+
+# EMG1: every https URL inside the emergency module stays on msstate.edu.
+EMG1_HITS=$(grep -RhoE "https://[a-zA-Z0-9.\-]+" msstate-policies/src/emergency/ 2>/dev/null \
+  | grep -vE "^https://([a-zA-Z0-9.\-]+\.)?msstate\.edu(/|$)" \
+  | sort -u)
+if [ -z "$EMG1_HITS" ]; then
+  score=$((score + 3))
+  note "PASS" "EMG1 all emergency-module URLs stay on msstate.edu" 3
+else
+  note "FAIL" "EMG1 non-msstate.edu URL in src/emergency/: $EMG1_HITS" 3
+fi
+
+# EMG2: EMERGENCY_ROOTS allowlist exists and is frozen.
+if grep -qE "Object\.freeze" msstate-policies/src/emergency/types.ts \
+   && grep -qE "EMERGENCY_ROOTS" msstate-policies/src/emergency/types.ts ; then
+  score=$((score + 2))
+  note "PASS" "EMG2 EMERGENCY_ROOTS frozen allowlist present in types.ts" 2
+else
+  note "FAIL" "EMG2 EMERGENCY_ROOTS allowlist missing or not frozen" 2
+fi
+
+# EMG3: Worker length-caps the 3 input-taking emergency tools before parse.
+# list_msu_emergency_types takes no input — exempt.
+if grep -qE "MAX_QUERY_CHARS" worker/src/index.ts \
+   && grep -qE "get_msu_emergency_guideline" worker/src/index.ts \
+   && grep -qE "find_msu_severe_weather_refuge" worker/src/index.ts \
+   && grep -qE "get_msu_emergency_contacts" worker/src/index.ts ; then
+  score=$((score + 3))
+  note "PASS" "EMG3 Worker length-caps emergency-tool input before parse" 3
+else
+  note "FAIL" "EMG3 Worker missing length cap for one or more emergency tools" 3
+fi
+
+# EMG4: build script aborts on poisoned emergency corpus.
+if grep -qF "refusing to ship a poisoned emergency corpus" scripts/build-worker-corpus.mjs; then
+  score=$((score + 2))
+  note "PASS" "EMG4 build aborts on poisoned emergency corpus" 2
+else
+  note "FAIL" "EMG4 build-worker-corpus.mjs missing emergency-corpus poison-abort" 2
+fi
+
 echo "$score"
