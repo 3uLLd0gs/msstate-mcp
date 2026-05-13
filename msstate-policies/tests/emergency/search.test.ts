@@ -96,18 +96,19 @@ describe("resolveGuideline — confidence threshold", () => {
     assert.ok(r.score > 0);
   });
 
-  test("ambiguous low-signal query yields matched=null + suggestions", () => {
+  test("weak BM25 score below MIN_ABSOLUTE yields matched=null (threshold gating)", () => {
+    // Single doc with a rare term "xyzzyx" only in body (weight 1).
+    // BM25 score for "xyzzyx" against this corpus is ~0.288 — well below
+    // MIN_ABSOLUTE=1.5. Old code (no threshold) would have returned this
+    // as a confident match; new code must reject and surface as did_you_mean.
     indexGuidelines([
-      { slug: "severe-weather", title: "Severe Weather", url: "x", body_markdown: "Seek refuge during a tornado.", aliases: ["tornado", "twister"], retrieved_at: "t" },
-      { slug: "active-shooter", title: "Active Shooter", url: "x", body_markdown: "Run, hide, fight.", aliases: ["gunman"], retrieved_at: "t" },
+      { slug: "severe-weather", title: "Severe Weather", url: "x", body_markdown: "xyzzyx",        aliases: [], retrieved_at: "t" },
     ] as any);
-    const r = resolveGuideline("the");
-    assert.equal(r.matched, null, "weak query must not produce a confident match");
+    const r = resolveGuideline("xyzzyx");
+    assert.equal(r.matched, null, "weak BM25 score must be rejected by threshold");
     assert.equal(r.via, "none");
-    assert.ok(
-      r.did_you_mean.length > 0 || r.suggestions.length > 0,
-      "must surface candidates so the user can pick",
-    );
+    assert.ok(r.did_you_mean.length > 0, "must surface the weak hit as a candidate");
+    assert.ok(r.score > 0, "score must reflect the (rejected) top hit");
   });
 
   test("score is exposed even when matched is null", () => {
