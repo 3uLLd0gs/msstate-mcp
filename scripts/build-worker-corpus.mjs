@@ -623,6 +623,74 @@ async function main() {
     };
   }
 
+  // v0.9.0 — per-category parse-quality ceilings. Counts come from
+  // reparsing each record's raw_prose with the live parser so a corpus
+  // scraped under any prior parser still gets audited under the current
+  // rules. Each ceiling is ~10–15% above the current measured baseline,
+  // giving headroom for MSU markup drift while catching real regressions.
+  {
+    const { execFileSync } = await import("node:child_process");
+    const proseList = Object.values(out.courses.records)
+      .map((rec) => rec.prereqs?.raw_prose ?? null)
+      .filter(Boolean);
+    // tsx -e runs in CJS mode; use require() with an absolute path so the
+    // parser is resolved relative to process.cwd() regardless of where tsx
+    // itself lives in node_modules.
+    const inlineScript = `
+const path = require("path");
+const { parsePrereqProse } = require(path.join(process.cwd(), "msstate-policies/src/courses/parser.ts"));
+const proses = JSON.parse(process.argv[1]);
+const breakdown = {
+  non_course_unparsed: 0,
+  grade_signal_present_but_unparsed: 0,
+  grade_signal_ambiguous: 0,
+  logic_ambiguous: 0,
+};
+for (const prose of proses) {
+  const reparsed = parsePrereqProse(prose);
+  for (const w of (reparsed?.parse_warnings ?? [])) {
+    if (w in breakdown) breakdown[w]++;
+  }
+}
+process.stdout.write(JSON.stringify(breakdown));
+`.trim();
+    let breakdownRaw;
+    try {
+      breakdownRaw = execFileSync(
+        "npx",
+        ["--yes", "tsx", "-e", inlineScript, JSON.stringify(proseList)],
+        {
+          cwd: process.cwd(),
+          stdio: ["ignore", "pipe", "inherit"],
+          maxBuffer: 4 * 1024 * 1024,
+        },
+      );
+    } catch (err) {
+      throw new Error(
+        `courses: parse-quality audit subprocess failed (${err.message ?? err}) — refusing to ship a poisoned course corpus`,
+      );
+    }
+    const breakdown = JSON.parse(breakdownRaw.toString("utf8"));
+    console.error(
+      `[build-worker-corpus]   courses_parse_quality: non_course_unparsed=${breakdown.non_course_unparsed} grade_unparsed=${breakdown.grade_signal_present_but_unparsed} logic_ambiguous=${breakdown.logic_ambiguous}`,
+    );
+    if (breakdown.non_course_unparsed > 35) {
+      throw new Error(
+        `courses: non_course_unparsed=${breakdown.non_course_unparsed} > 35 — refusing to ship a poisoned course corpus`,
+      );
+    }
+    if (breakdown.grade_signal_present_but_unparsed > 20) {
+      throw new Error(
+        `courses: grade_signal_present_but_unparsed=${breakdown.grade_signal_present_but_unparsed} > 20 — refusing to ship a poisoned course corpus`,
+      );
+    }
+    if (breakdown.logic_ambiguous > 200) {
+      throw new Error(
+        `courses: logic_ambiguous=${breakdown.logic_ambiguous} > 200 — refusing to ship a poisoned course corpus`,
+      );
+    }
+  }
+
   const emergencyPayload = await scrapeEmergencyViaSubprocess();
   out.emergency = {
     builtAt,
