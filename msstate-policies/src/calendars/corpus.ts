@@ -41,9 +41,30 @@ interface CacheEntry {
   rows: CalendarRow[];
   expiresAt: number;
   error: string | null;
+  // last successful rows, kept even if the most recent attempt errored
+  lastGoodRows: CalendarRow[];
+  lastGoodAt: number | null;
 }
 
 const cache = new Map<CalendarSource, CacheEntry>();
+// Error entries are never cached — always retry on next call so a single
+// WAF challenge or network blip doesn't lock a source out for the rest of the day.
+const NEGATIVE_TTL_MS = 0;
+
+type Scraper = (source: CalendarSource) => Promise<ScrapeResult>;
+let scraperImpl: Scraper = scrapeCalendar;
+export function __setScraperForTests(s: Scraper): void { scraperImpl = s; }
+
+export function resetCalendarCacheForTests(opts: { keepLastGood?: boolean } = {}): void {
+  if (!opts.keepLastGood) {
+    cache.clear();
+    scraperImpl = scrapeCalendar;
+    return;
+  }
+  for (const [k, v] of cache) {
+    cache.set(k, { ...v, expiresAt: 0 });
+  }
+}
 
 function ttlMsFor(source: CalendarSource): number {
   return source === "housing" ? 6 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
@@ -102,16 +123,29 @@ export async function loadCalendarSource(source: CalendarSource): Promise<Scrape
   if (hit && hit.expiresAt > now) {
     return { source, rows: hit.rows, error: hit.error };
   }
-  const result = await scrapeCalendar(source);
-  cache.set(source, {
-    rows: result.rows,
-    error: result.error,
-    expiresAt: now + ttlMsFor(source),
-  });
-  if (result.error) {
-    log("warn", "calendar source scrape error", { source, error: result.error });
+  const result = await scraperImpl(source);
+  const wasError = result.error !== null;
+  const lkg = hit?.lastGoodRows ?? [];
+  const entry: CacheEntry = wasError
+    ? {
+        rows: lkg, // serve last-known-good on transient error
+        error: result.error,
+        expiresAt: now + NEGATIVE_TTL_MS,
+        lastGoodRows: lkg,
+        lastGoodAt: hit?.lastGoodAt ?? null,
+      }
+    : {
+        rows: result.rows,
+        error: null,
+        expiresAt: now + ttlMsFor(source),
+        lastGoodRows: result.rows,
+        lastGoodAt: now,
+      };
+  cache.set(source, entry);
+  if (wasError) {
+    log("warn", "calendar source scrape error (serving LKG)", { source, error: result.error, lkg_count: lkg.length });
   }
-  return result;
+  return { source, rows: entry.rows, error: entry.error };
 }
 
 export function getCalendarsCorpusHealth(): {
