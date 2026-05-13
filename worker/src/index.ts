@@ -934,6 +934,51 @@ const TOOLS = [
     },
   },
   {
+    name: "get_msu_emergency_guideline",
+    description:
+      "Look up MSU's published emergency guideline for a situation (tornado, fire, active shooter, etc.). Returns the guideline verbatim plus a 911 reminder. Every response leads with the disclaimer 'If this is a life-threatening emergency, call 911 now...'. `emergency_type` accepts a slug, an alias ('tornado', 'fire', 'shooter'), or free text — the resolver tries exact slug, then the curated alias map, then BM25. All content sourced from www.emergency.msstate.edu/guidelines.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        emergency_type: { type: "string", description: "Emergency type — slug, alias, or free text." },
+      },
+      required: ["emergency_type"],
+    },
+  },
+  {
+    name: "list_msu_emergency_types",
+    description:
+      "List MSU's published emergency-guideline types (12 entries). Returns `{ slug, title, url }` for each. Every response leads with the 911 disclaimer. All content from www.emergency.msstate.edu/guidelines.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "find_msu_severe_weather_refuge",
+    description:
+      "Look up the published severe-weather refuge area for an MSU building. Returns `{ building, area, note }` rows from www.emergency.msstate.edu/refuge. SEVERE WEATHER ONLY — for fires use `get_msu_emergency_guideline(\"smoke-fire\")`; for active threats use `get_msu_emergency_guideline(\"violence\")`. Every response leads with the 911 disclaimer.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        building_name: { type: "string", description: "Building name, fuzzy match." },
+      },
+      required: ["building_name"],
+    },
+  },
+  {
+    name: "get_msu_emergency_contacts",
+    description:
+      "Return MSU emergency-related phone contacts. `category` accepts: 'all' (default), 'emergency', 'campus', 'off_campus'. Every response leads with the 911 disclaimer. All numbers sourced from www.emergency.msstate.edu/refuge.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        category: {
+          type: "string",
+          description: "all | emergency | campus | off_campus",
+          default: "all",
+        },
+      },
+    },
+  },
+  {
     name: "health_check",
     description:
       "Inspect the Worker's corpus state. Returns counts, build timestamp, and runtime info. Visible to the LLM so it can apologize coherently if the corpus is stale or empty.",
@@ -1206,10 +1251,94 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Mc
       return jsonContent(g);
     }
 
+    case "get_msu_emergency_guideline": {
+      const raw = String(args.emergency_type ?? "");
+      if (raw.length === 0) return errorContent("emergency_type is required.");
+      if (raw.length > MAX_QUERY_CHARS) return tooLong("emergency_type", raw);
+      const r = resolveEmergencyGuideline(raw);
+      const contactsQuick: { label: string; phone: string }[] = [];
+      const e911 = EMERGENCY?.contacts.find((c) => c.phone === "911");
+      const pd = EMERGENCY?.contacts.find(
+        (c) => /police/i.test(c.label) && c.category === "campus_non_emergency",
+      );
+      if (e911) contactsQuick.push({ label: e911.label, phone: e911.phone });
+      if (pd) contactsQuick.push({ label: pd.label, phone: pd.phone });
+      if (r.matched) {
+        return jsonContent({
+          disclaimer: MANDATORY_DISCLAIMER,
+          matched: {
+            slug: r.matched.slug,
+            title: r.matched.title,
+            url: r.matched.url,
+            body_markdown: r.matched.body_markdown,
+            retrieved_at: r.matched.retrieved_at,
+          },
+          did_you_mean: r.did_you_mean.map((g) => ({ slug: g.slug, title: g.title })),
+          contacts_quick: contactsQuick,
+        });
+      }
+      return jsonContent({
+        disclaimer: MANDATORY_DISCLAIMER,
+        matched: null,
+        did_you_mean: [],
+        suggestions: (EMERGENCY?.guidelines ?? []).map((g) => ({ slug: g.slug, title: g.title })),
+        contacts_quick: contactsQuick,
+      });
+    }
+
+    case "list_msu_emergency_types": {
+      return jsonContent({
+        disclaimer: MANDATORY_DISCLAIMER,
+        types: (EMERGENCY?.guidelines ?? []).map((g) => ({ slug: g.slug, title: g.title, url: g.url })),
+      });
+    }
+
+    case "find_msu_severe_weather_refuge": {
+      const raw = String(args.building_name ?? "");
+      if (raw.length === 0) return errorContent("building_name is required.");
+      if (raw.length > MAX_QUERY_CHARS) return tooLong("building_name", raw);
+      const SCOPE_NOTE =
+        "Severe-weather refuge areas only. For fires, evacuate via the nearest exit (see `smoke-fire` / `building-evacuations`). For active threats, see `violence-threats-of-violence`.";
+      const FALLBACK_GUIDANCE =
+        "If your building isn't listed, the published guidance is: go to the lowest interior level, away from windows, in a small interior room or hallway.";
+      const matches = findEmergencyRefuge(raw);
+      if (matches.length > 0) {
+        return jsonContent({
+          disclaimer: MANDATORY_DISCLAIMER,
+          scope_note: SCOPE_NOTE,
+          matches,
+        });
+      }
+      return jsonContent({
+        disclaimer: MANDATORY_DISCLAIMER,
+        scope_note: SCOPE_NOTE,
+        matches: [],
+        fallback_when_no_match: {
+          guidance: FALLBACK_GUIDANCE,
+          source_url: "https://www.emergency.msstate.edu/refuge",
+        },
+      });
+    }
+
+    case "get_msu_emergency_contacts": {
+      const raw = String(args.category ?? "all");
+      if (raw.length > MAX_QUERY_CHARS) return tooLong("category", raw);
+      const contacts = filterEmergencyContacts(raw).map((c) => ({
+        label: c.label,
+        phone: c.phone,
+        category: c.category,
+      }));
+      return jsonContent({
+        disclaimer: MANDATORY_DISCLAIMER,
+        contacts,
+        source_url: "https://www.emergency.msstate.edu/refuge",
+      });
+    }
+
     case "health_check": {
       return jsonContent({
         runtime: "cloudflare-workers",
-        version: "0.6.0",
+        version: "0.7.0",
         index_row_count: corpus.indexRowCount,
         policies_in_corpus: POLICIES.length,
         corpus_built_at: corpus.builtAt,
@@ -1220,6 +1349,10 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Mc
         calendars_per_source: CAL_PER_SOURCE,
         courses_in_corpus: COURSES ? Object.keys(COURSES.records).length : 0,
         courses_scraped_at: COURSES?.scraped_at ?? null,
+        emergency_guideline_count: EMERGENCY?.guidelines.length ?? 0,
+        emergency_refuge_count: EMERGENCY?.refuge_areas.length ?? 0,
+        emergency_contact_count: EMERGENCY?.contacts.length ?? 0,
+        emergency_built_at: EMERGENCY?.builtAt ?? null,
         note: "This is the Cloudflare Workers variant. Corpus is a pre-extracted snapshot; rebuild via scripts/build-worker-corpus.mjs to refresh.",
       });
     }
@@ -1256,7 +1389,7 @@ async function handleRpc(req: JsonRpcRequest): Promise<JsonRpcResponse | null> {
         id,
         result: {
           protocolVersion: PROTOCOL_VERSION,
-          serverInfo: { name: "msstate-policies", version: "0.6.0" },
+          serverInfo: { name: "msstate-policies", version: "0.7.0" },
           capabilities: { tools: { listChanged: false } },
         },
       };
@@ -1326,7 +1459,7 @@ export default {
           JSON.stringify(
             {
               name: "msstate-policies-mcp",
-              version: "0.6.0",
+              version: "0.7.0",
               runtime: "cloudflare-workers",
               policies: POLICIES.length,
               builtAt: corpus.builtAt,
