@@ -11,7 +11,7 @@ const Input = z
 export const get_msu_course = {
   name: "get_msu_course",
   description:
-    "Fetch one course's full record from the MSU catalog: title, hours, level, description, semester offered, prereqs (with structured course-codes + raw prose), coreqs, cross-listed equivalents, source URL. `code` is normalized to uppercase with single space (e.g. 'cse 4153' → 'CSE 4153'). Returns `{found:false, suggestions}` if unknown. Prereq fields `required_courses` and `raw_prose` are authoritative; `logic`, `min_grade`, `non_course` are best-effort parses of MSU's prose.",
+    "Fetch one course's full record from the MSU catalog: title, hours, level, description, semester offered, prereqs (with structured course-codes + raw prose), coreqs, cross-listed equivalents, source URL. `code` is normalized to uppercase with single space (e.g. 'cse 4153' → 'CSE 4153'). Returns `{found:false, suggestions}` if unknown. Prereq fields `required_courses` and `raw_prose` are authoritative; `logic`, `min_grade`, `non_course` are best-effort parses of MSU's prose. Prefer `prereq_summary` for quoting prereqs in answers; fall back to `raw_prose` when `prereqs.parse_warnings` is non-empty.",
   inputSchema: zodToJsonSchema(Input, { target: "openApi3" }),
   zodSchema: Input,
   async handler(rawInput: unknown) {
