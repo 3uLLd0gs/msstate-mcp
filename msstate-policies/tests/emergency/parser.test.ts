@@ -1,6 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { parseGuidelineHtml } from "../../src/emergency/parser.js";
+import { parseRefugeHtml } from "../../src/emergency/parser.js";
 
 const SAMPLE_HTML = `<!doctype html><html><body>
   <main>
@@ -49,5 +50,35 @@ describe("parseGuidelineHtml", () => {
   </body></html>`;
     const r = parseGuidelineHtml(html, "test-slug");
     assert.equal(r?.title, "Plain Heading Only");
+  });
+});
+
+const REFUGE_HTML = `<!doctype html><html><body><main>
+  <h1>Severe Weather Refuge Areas</h1>
+  <p>Buildings marked with * are available during normal operations only.</p>
+  <table class="table">
+    <thead><tr><th>Building</th><th>Area Description</th></tr></thead>
+    <tbody>
+      <tr><td>Colvard Student Union*</td><td>Room 123, first floor.</td></tr>
+      <tr><td>Lee Hall</td><td>Basement hallway areas 0010, 0011.</td></tr>
+    </tbody>
+  </table>
+</main></body></html>`;
+
+describe("parseRefugeHtml", () => {
+  test("extracts rows from the refuge table", () => {
+    const rows = parseRefugeHtml(REFUGE_HTML);
+    assert.equal(rows.length, 2);
+    assert.equal(rows[1].building, "Lee Hall");
+    assert.match(rows[1].area, /Basement hallway/);
+    assert.equal(rows[1].note, null);
+  });
+  test("strips the * glyph from building name and resolves footnote to note", () => {
+    const rows = parseRefugeHtml(REFUGE_HTML);
+    assert.equal(rows[0].building, "Colvard Student Union");
+    assert.match(rows[0].note ?? "", /normal operations only/i);
+  });
+  test("returns empty array when no table is found", () => {
+    assert.deepEqual(parseRefugeHtml("<main><p>nothing</p></main>"), []);
   });
 });
