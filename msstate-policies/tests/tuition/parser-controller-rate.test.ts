@@ -61,6 +61,44 @@ describe("parseControllerRateHtml — mgccc (undergrad-only)", () => {
   });
 });
 
+describe("parseControllerRateHtml — Starkville pinned amounts (regression guard)", () => {
+  // 1-11 tables have ONE Total row labeled "Total Fee (Per Credit Hour)" —
+  // it IS the headline. Prior versions of the parser incorrectly excluded
+  // it and summed line_items + the Total row, producing a doubled value
+  // ($916.50 instead of $458.25).
+  test("undergrad resident fall_spring 1-11 amount_usd is ~$458.25 (not the doubled $916.50)", () => {
+    const rows = parseControllerRateHtml(FIXTURE_STK, "starkville", URL_STK);
+    const target = rows.find(
+      (r) =>
+        r.level === "undergrad" &&
+        r.residency === "resident" &&
+        r.term === "fall_spring" &&
+        r.credit_hour_bucket === "1-11",
+    );
+    assert.ok(target, "starkville undergrad resident 1-11 row missing");
+    assert.ok(
+      Math.abs(target.amount_usd - 458.25) < 0.5,
+      `expected ~$458.25, got $${target.amount_usd}`,
+    );
+  });
+  // 12-16 tables have TWO Total rows. The headline is the per-semester one.
+  test("undergrad resident fall_spring 12-16 amount_usd is ~$5,497.50 (per-semester headline)", () => {
+    const rows = parseControllerRateHtml(FIXTURE_STK, "starkville", URL_STK);
+    const target = rows.find(
+      (r) =>
+        r.level === "undergrad" &&
+        r.residency === "resident" &&
+        r.term === "fall_spring" &&
+        r.credit_hour_bucket === "12-16",
+    );
+    assert.ok(target, "starkville undergrad resident 12-16 row missing");
+    assert.ok(
+      Math.abs(target.amount_usd - 5497.50) < 1,
+      `expected ~$5,497.50, got $${target.amount_usd}`,
+    );
+  });
+});
+
 describe("parseControllerRateHtml — meridian source-typo reconciliation", () => {
   // MSU's Meridian non-resident 12-16 Total cell publishes "$14.968.00"
   // (period instead of comma as thousands separator). The parser reconciles

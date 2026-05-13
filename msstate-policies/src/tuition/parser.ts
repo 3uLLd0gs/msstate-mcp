@@ -459,10 +459,16 @@ export function parseControllerRateHtml(
       const nonResidentIdx = /non.?resident/.test(col2) ? 2 : /non.?resident/.test(col1) ? 1 : -1;
       if (residentIdx < 0 || nonResidentIdx < 0) return;
 
+      // Two-pass row scan. Collect candidate Total rows + line items first;
+      // pick the headline Total once we know how many candidates exist:
+      //   - 1-11 tables have ONE Total row "Total Fee (Per Credit Hour)" — it
+      //     IS the headline (the whole table is per-credit-hour).
+      //   - 12-16 tables have TWO: "Total Fee" (per-semester, headline) and
+      //     "Total Fee (Per Credit Hour)" (derived breakdown).
+      interface TotalCandidate { label: string; res: number | null; nonRes: number | null; }
       const residentItems: LineItem[] = [];
       const nonResidentItems: LineItem[] = [];
-      let residentTotal: number | null = null;
-      let nonResidentTotal: number | null = null;
+      const totalCandidates: TotalCandidate[] = [];
 
       for (let i = 1; i < rows.length; i++) {
         const cells = $(rows[i])
@@ -476,19 +482,29 @@ export function parseControllerRateHtml(
 
         const resAmt = parseMoney(cells[residentIdx]);
         const nonResAmt = parseMoney(cells[nonResidentIdx]);
-        // "Total Fee" is the headline per-semester (or per-hour) amount we want.
-        // "Total Fee (Per Credit Hour)" is a derived per-hour breakdown on the
-        // full-time tables — treat it as a line item, not the headline total.
-        const isTotal = /total/i.test(label) && !/per.{0,4}(credit|hour)/i.test(label);
 
-        if (isTotal) {
-          residentTotal = resAmt;
-          nonResidentTotal = nonResAmt;
+        if (/total/i.test(label)) {
+          totalCandidates.push({ label, res: resAmt, nonRes: nonResAmt });
         } else {
           if (resAmt !== null) residentItems.push({ label, amount_usd: resAmt });
           if (nonResAmt !== null) nonResidentItems.push({ label, amount_usd: nonResAmt });
         }
       }
+
+      // Pick headline Total: prefer a row WITHOUT the "Per Credit Hour"
+      // qualifier when multiple Total rows exist; otherwise take the only one.
+      const isPerCreditQualifier = (s: string): boolean =>
+        /per.{0,4}(credit|hour)/i.test(s);
+      let headlineTotal: TotalCandidate | null = null;
+      if (totalCandidates.length === 1) {
+        headlineTotal = totalCandidates[0];
+      } else if (totalCandidates.length > 1) {
+        headlineTotal =
+          totalCandidates.find((c) => !isPerCreditQualifier(c.label)) ??
+          totalCandidates[0];
+      }
+      let residentTotal: number | null = headlineTotal?.res ?? null;
+      let nonResidentTotal: number | null = headlineTotal?.nonRes ?? null;
 
       // Reconcile Total against line-items sum.
       //  - If no Total row was parsed, sum the line items.
