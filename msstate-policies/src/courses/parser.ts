@@ -14,11 +14,47 @@ import { COURSE_CODE_RE, type Course, type Prereq } from "./types.js";
 
 const COURSE_TOKEN_RE = /\b[A-Z]{2,4}\s\d{4}\b/g;
 const NON_COURSE_PATTERNS: Array<{ rx: RegExp; label: (m: RegExpExecArray) => string }> = [
+  // EXISTING — keep verbatim (regression-guarded by Task 2.1's "preserves existing patterns" block).
   { rx: /\bconsent of (?:the )?instructor\b/gi, label: () => "consent of instructor" },
   { rx: /\bpermission of (?:the )?(?:instructor|department head)\b/gi, label: (m) => m[0].toLowerCase() },
   { rx: /\b(junior|senior|graduate|sophomore|freshman) standing\b/gi, label: (m) => `${m[1].toLowerCase()} standing` },
   { rx: /\bACT\s+\d+\b/gi, label: (m) => m[0] },
   { rx: /\bSAT\s+\d+\b/gi, label: (m) => m[0] },
+
+  // NEW (v0.9.0) — broader permission/consent. Captures "permission/consent of <role>"
+  // including "permission of practicum director", "consent of the primary advisor", etc.
+  // Stops at AND/OR/punctuation so it doesn't gobble downstream clauses.
+  {
+    rx: /\b(permission|consent)\s+of\s+(?:the\s+)?([\w\s]+?)(?=\s+and\b|\s+or\b|[;.,)]|$)/gi,
+    label: (m) => `${m[1].toLowerCase()} of ${m[2].trim().toLowerCase()}`,
+  },
+
+  // NEW — admission status. "Admission to Teacher Education", etc.
+  // Captures "Admission to <Program>" where Program starts with a capital.
+  {
+    rx: /\bAdmission\s+to\s+(?:the\s+)?([A-Z][\w\s]+?)(?=\s+and\b|\s+or\b|[;.,)]|$)/g,
+    label: (m) => `Admission to ${m[1].trim()}`,
+  },
+
+  // NEW — hours-of-X. "Seven hours of biological science", "Thirty hours of BIO graduate work".
+  // The hour count can be written (Seven, Thirty) or numeric (7, 30).
+  {
+    rx: /\b((?:[A-Z][a-z]+(?:-[a-z]+)?|\d+))\s+hours?\s+of\s+([^,.()]+?)(?=\s+and\b|\s+or\b|[;.,)]|$)/gi,
+    label: (m) => `${m[1]} hours of ${m[2].trim()}`,
+  },
+
+  // NEW — completion of X. "Completion of any 1000-level history course",
+  // "Completion of all core Master of Public Health courses".
+  {
+    rx: /\bCompletion\s+of\s+([^,.()]+?)(?=\s+and\b|\s+or\b|[;.,)]|$)/gi,
+    label: (m) => `Completion of ${m[1].trim()}`,
+  },
+
+  // NEW — proficiency / skill. "Proficiency with spreadsheet software", "Proficiency in MATLAB".
+  {
+    rx: /\bProficiency\s+(?:with|in)\s+([^,.()]+?)(?=\s+and\b|\s+or\b|[;.,)]|$)/gi,
+    label: (m) => `Proficiency with ${m[1].trim()}`,
+  },
 ];
 
 function extractParenthesized(label: "Prerequisites" | "Corequisites", input: string): string | null {

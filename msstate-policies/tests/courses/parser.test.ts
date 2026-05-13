@@ -141,3 +141,78 @@ describe("parseCourseHtml", () => {
     assert.equal(typeof c.hours === "string" ? c.hours : String(c.hours), "0,4");
   });
 });
+
+describe("extractNonCourse — Section 1 (admission status)", () => {
+  test("extracts 'Admission to Teacher Education'", () => {
+    const p = parsePrereqProse("(Prerequisites: Admission to Teacher Education)");
+    assert.ok(p);
+    assert.ok(p.non_course.some((s) => /Admission to Teacher Education/i.test(s)));
+  });
+  test("extracts mixed admission + standing", () => {
+    const p = parsePrereqProse("(Prerequisites: Admission to Teacher Education and senior standing)");
+    assert.ok(p);
+    assert.ok(p.non_course.some((s) => /Admission to Teacher Education/i.test(s)));
+    assert.ok(p.non_course.some((s) => /senior standing/i.test(s)));
+  });
+});
+
+describe("extractNonCourse — Section 1 (hours-of-X)", () => {
+  test("extracts 'Seven hours of biological science'", () => {
+    const p = parsePrereqProse("(Prerequisites: Seven hours of biological science)");
+    assert.ok(p);
+    assert.ok(p.non_course.some((s) => /Seven hours of biological science/i.test(s)));
+  });
+  test("extracts hours phrasing with 'and'-joined clauses", () => {
+    const p = parsePrereqProse("(Prerequisites: Ten hours of biological science and organic chemistry)");
+    assert.ok(p);
+    assert.ok(p.non_course.length >= 1);
+  });
+});
+
+describe("extractNonCourse — Section 1 (completion of X)", () => {
+  test("extracts 'Completion of any 1000-level history course'", () => {
+    const p = parsePrereqProse("(Prerequisites: Completion of any 1000-level history course)");
+    assert.ok(p);
+    assert.ok(p.non_course.some((s) => /Completion of any 1000-level history course/i.test(s)));
+  });
+  test("extracts MPH core completion phrasing", () => {
+    const p = parsePrereqProse("(Prerequisites: Completion of all core Master of Public Health courses AND permission of primary advisor)");
+    assert.ok(p);
+    assert.ok(p.non_course.some((s) => /Completion of all core Master of Public Health courses/i.test(s)));
+    assert.ok(p.non_course.some((s) => /permission of primary advisor/i.test(s)));
+  });
+});
+
+describe("extractNonCourse — Section 1 (proficiency)", () => {
+  test("extracts 'Proficiency with spreadsheet software'", () => {
+    const p = parsePrereqProse("(Prerequisites: Proficiency with spreadsheet software)");
+    assert.ok(p);
+    assert.ok(p.non_course.some((s) => /Proficiency with spreadsheet software/i.test(s)));
+  });
+});
+
+describe("extractNonCourse — Section 1 (broader permission phrasing)", () => {
+  test("extracts 'permission of practicum director'", () => {
+    const p = parsePrereqProse("(Prerequisites: Master of Public Health core courses and permission of practicum director)");
+    assert.ok(p);
+    assert.ok(p.non_course.some((s) => /permission of practicum director/i.test(s)));
+  });
+  test("extracts 'consent of the practicum director' (with definite article)", () => {
+    const p = parsePrereqProse("(Prerequisites: consent of the practicum director)");
+    assert.ok(p);
+    assert.ok(p.non_course.some((s) => /consent of (the )?practicum director/i.test(s)));
+  });
+});
+
+describe("extractNonCourse — preserves existing patterns (regression guard)", () => {
+  test("still extracts 'consent of instructor'", () => {
+    const p = parsePrereqProse("(Prerequisites: consent of instructor)");
+    assert.ok(p);
+    assert.ok(p.non_course.some((s) => /consent of instructor/i.test(s)));
+  });
+  test("still extracts 'senior standing'", () => {
+    const p = parsePrereqProse("(Prerequisites: senior standing)");
+    assert.ok(p);
+    assert.ok(p.non_course.some((s) => /senior standing/i.test(s)));
+  });
+});
