@@ -68,3 +68,50 @@ export function courseCorpusHealth(): {
     scraped_at: CORPUS.scraped_at,
   };
 }
+
+export interface CoursesParseQuality {
+  total_records: number;
+  with_prose: number;
+  fully_parsed: number;
+  with_warnings: number;
+  warning_breakdown: {
+    non_course_unparsed: number;
+    grade_signal_present_but_unparsed: number;
+    grade_signal_ambiguous: number;
+    logic_ambiguous: number;
+  };
+}
+
+export function coursesParseQuality(): CoursesParseQuality {
+  const records = getCourseCorpus()?.records ?? {};
+  let withProse = 0;
+  let fullyParsed = 0;
+  let withWarnings = 0;
+  const breakdown = {
+    non_course_unparsed: 0,
+    grade_signal_present_but_unparsed: 0,
+    grade_signal_ambiguous: 0,
+    logic_ambiguous: 0,
+  };
+  for (const rec of Object.values(records)) {
+    if (rec.prereqs?.raw_prose) {
+      withProse++;
+      const ws = rec.prereqs.parse_warnings ?? [];
+      if (ws.length === 0) {
+        fullyParsed++;
+      } else {
+        withWarnings++;
+        for (const w of ws) {
+          if (w in breakdown) breakdown[w as keyof typeof breakdown]++;
+        }
+      }
+    }
+  }
+  return {
+    total_records: Object.keys(records).length,
+    with_prose: withProse,
+    fully_parsed: fullyParsed,
+    with_warnings: withWarnings,
+    warning_breakdown: breakdown,
+  };
+}

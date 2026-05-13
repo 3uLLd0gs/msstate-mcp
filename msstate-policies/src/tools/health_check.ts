@@ -4,6 +4,7 @@ import { fetchIndex, getScraperHealth } from "../scraper.js";
 import { getSearchHealth } from "../search.js";
 import { getCorpusHealth } from "../corpus.js";
 import { getCalendarsCorpusHealth } from "../calendars/corpus.js";
+import { coursesParseQuality } from "../courses/corpus.js";
 import { HealthState } from "../types.js";
 
 const HealthInput = z.object({}).strict();
@@ -75,6 +76,7 @@ export const health_check = {
       calendars_row_count: calendarsRowCount,
       calendars_per_source: cal.per_source,
       calendars_last_error: calendarsLastError,
+      courses_parse_quality: coursesParseQuality(),
     };
     return {
       content: [{ type: "text", text: JSON.stringify(state, null, 2) }],
