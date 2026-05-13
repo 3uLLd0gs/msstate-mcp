@@ -63,6 +63,7 @@ interface Prereq {
   min_grade: "A" | "B" | "C" | "D" | null;
   non_course: string[];
   raw_prose: string;
+  parse_warnings?: string[];
 }
 
 interface Course {
@@ -76,6 +77,7 @@ interface Course {
   coreqs: Prereq | null;
   cross_listed: string[];
   source_url: string;
+  prereq_summary?: string | null;
 }
 
 interface CourseCorpus {
@@ -1600,6 +1602,7 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Mc
         tuition_fee_count: TUITION?.fee_rows.length ?? 0,
         tuition_faq_count: TUITION?.faq_rows.length ?? 0,
         tuition_campus_count: TUITION?.campuses.length ?? 0,
+        courses_parse_quality: coursesParseQualityWorker(),
         note: "This is the Cloudflare Workers variant. Corpus is a pre-extracted snapshot; rebuild via scripts/build-worker-corpus.mjs to refresh.",
       });
     }
@@ -1648,6 +1651,49 @@ Anti-hallucination rules — load-bearing:
 - Quote dates, policy text, fee amounts, and emergency guidance VERBATIM from the tool result. Always include the source URL or pre-formatted citation field returned by the tool.
 - If the question is not about MSU, or no tool returns a useful result after a reasonable attempt, say so plainly. Do NOT invent dates, dollar amounts, holiday lists, or policy text.
 - If your first tool guess returns an empty/unhelpful result, try the next-most-likely tool before falling back to general knowledge.`;
+
+function coursesParseQualityWorker(): {
+  total_records: number;
+  with_prose: number;
+  fully_parsed: number;
+  with_warnings: number;
+  warning_breakdown: Record<string, number>;
+} {
+  const records = (corpusData as {
+    courses?: {
+      records?: Record<
+        string,
+        { prereqs?: { raw_prose: string | null; parse_warnings?: string[] } | null }
+      >;
+    };
+  }).courses?.records ?? {};
+  let withProse = 0, fullyParsed = 0, withWarnings = 0;
+  const breakdown: Record<string, number> = {
+    non_course_unparsed: 0,
+    grade_signal_present_but_unparsed: 0,
+    grade_signal_ambiguous: 0,
+    logic_ambiguous: 0,
+  };
+  for (const rec of Object.values(records)) {
+    if (rec.prereqs?.raw_prose) {
+      withProse++;
+      const ws = rec.prereqs.parse_warnings ?? [];
+      if (ws.length === 0) {
+        fullyParsed++;
+      } else {
+        withWarnings++;
+        for (const w of ws) if (w in breakdown) breakdown[w]++;
+      }
+    }
+  }
+  return {
+    total_records: Object.keys(records).length,
+    with_prose: withProse,
+    fully_parsed: fullyParsed,
+    with_warnings: withWarnings,
+    warning_breakdown: breakdown,
+  };
+}
 
 async function handleRpc(req: JsonRpcRequest): Promise<JsonRpcResponse | null> {
   const id = req.id ?? null;
