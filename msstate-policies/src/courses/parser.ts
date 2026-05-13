@@ -292,3 +292,35 @@ export function parseCourseHtml(html: string, expectedCode: string): Course | nu
     prereq_summary: null,  // Task 6.1 will build the real summary
   };
 }
+
+const PREREQ_WARNING_SENTINEL =
+  "(prereqs published but not machine-parsed in full — see raw_prose)";
+
+/** Build a one-line human-readable prereq summary from the structured fields.
+ *
+ *  Rules (deterministic, no LLM):
+ *   1. null → null
+ *   2. any parse_warnings → sentinel string ("fall back to raw_prose")
+ *   3. else: join required_courses by AND/OR (logic defaults to "and"),
+ *      append "(min_grade or better)" if min_grade set,
+ *      append "; <non_course items>" joined by "; ".
+ */
+export function buildPrereqSummary(p: Prereq | null): string | null {
+  if (p === null) return null;
+  if (p.parse_warnings.length > 0) return PREREQ_WARNING_SENTINEL;
+
+  const parts: string[] = [];
+
+  if (p.required_courses.length > 0) {
+    const joiner = p.logic === "or" ? " or " : " and ";
+    let courses = p.required_courses.join(joiner);
+    if (p.min_grade) courses = `${courses} (${p.min_grade} or better)`;
+    parts.push(courses);
+  }
+
+  if (p.non_course.length > 0) {
+    parts.push(p.non_course.join("; "));
+  }
+
+  return parts.length > 0 ? parts.join("; ") : null;
+}
