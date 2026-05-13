@@ -2,6 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { parseGuidelineHtml } from "../../src/emergency/parser.js";
 import { parseRefugeHtml } from "../../src/emergency/parser.js";
+import { parseContactsHtml } from "../../src/emergency/parser.js";
 
 const SAMPLE_HTML = `<!doctype html><html><body>
   <main>
@@ -80,5 +81,45 @@ describe("parseRefugeHtml", () => {
   });
   test("returns empty array when no table is found", () => {
     assert.deepEqual(parseRefugeHtml("<main><p>nothing</p></main>"), []);
+  });
+});
+
+const CONTACTS_HTML = `<!doctype html><html><body><main>
+  <h3>Important Contacts</h3>
+  <ul>
+    <li><a href="tel:911">EMERGENCY: 911</a> <strong>911</strong></li>
+  </ul>
+  <h4>Campus Contacts (non-emergency)</h4>
+  <ul>
+    <li><a href="tel:(662) 325-2121">Mississippi State University Police</a> <strong>(662) 325-2121</strong></li>
+    <li><a href="tel:(662) 325-2091">Student Counseling Services</a> <strong>(662) 325-2091</strong></li>
+  </ul>
+  <h4>Off Campus Contacts (non-emergency)</h4>
+  <ul>
+    <li><a href="tel:(662) 323-4134">Starkville Police Department</a> <strong>(662) 323-4134</strong></li>
+  </ul>
+</main></body></html>`;
+
+describe("parseContactsHtml", () => {
+  test("classifies 911 as emergency category", () => {
+    const rows = parseContactsHtml(CONTACTS_HTML);
+    const e = rows.find((r) => r.phone === "911");
+    assert.ok(e, "expected 911 row");
+    assert.equal(e!.category, "emergency");
+    assert.match(e!.label, /EMERGENCY/i);
+  });
+  test("classifies MSU PD as campus_non_emergency", () => {
+    const rows = parseContactsHtml(CONTACTS_HTML);
+    const r = rows.find((r) => /Mississippi State University Police/i.test(r.label));
+    assert.equal(r?.category, "campus_non_emergency");
+    assert.equal(r?.phone, "(662) 325-2121");
+  });
+  test("classifies Starkville PD as off_campus_non_emergency", () => {
+    const rows = parseContactsHtml(CONTACTS_HTML);
+    const r = rows.find((r) => /Starkville Police/i.test(r.label));
+    assert.equal(r?.category, "off_campus_non_emergency");
+  });
+  test("returns empty array when 'Important Contacts' is absent", () => {
+    assert.deepEqual(parseContactsHtml("<main><p>nothing</p></main>"), []);
   });
 });

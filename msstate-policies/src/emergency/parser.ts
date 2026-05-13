@@ -107,7 +107,41 @@ export function parseRefugeHtml(html: string): Omit<RefugeRow, "retrieved_at" | 
   return rows;
 }
 
-/** Contacts list parser — Task 4 replaces this stub. */
-export function parseContactsHtml(_html: string): Omit<ContactRow, "retrieved_at" | "source_url">[] {
-  return [];
+export function parseContactsHtml(html: string): Omit<ContactRow, "retrieved_at" | "source_url">[] {
+  const $ = cheerioLoad(html);
+  const main = $("main").first();
+  if (main.length === 0) return [];
+
+  // Find the "Important Contacts" heading and walk forward through its siblings.
+  const anchor = main.find("h3").filter((_, h) =>
+    /important contacts/i.test($(h).text())
+  ).first();
+  if (anchor.length === 0) return [];
+
+  const rows: Omit<ContactRow, "retrieved_at" | "source_url">[] = [];
+  let category: ContactRow["category"] = "emergency"; // first <ul> after the h3 is emergency
+
+  anchor.nextAll().each((_, el) => {
+    const tag = ((el as Element).tagName ?? "").toLowerCase();
+    if (tag === "h4") {
+      const t = $(el).text().toLowerCase();
+      if (t.includes("off campus") || t.includes("off-campus")) {
+        category = "off_campus_non_emergency";
+      } else if (t.includes("campus")) {
+        category = "campus_non_emergency";
+      }
+      return;
+    }
+    if (tag === "ul") {
+      $(el).find("> li").each((_, li) => {
+        const label = $(li).find("a").first().text().trim().replace(/\s+/g, " ");
+        const phone = $(li).find("strong").first().text().trim().replace(/\s+/g, " ");
+        if (!label || !phone) return;
+        // Drop ":" from a label like "EMERGENCY: 911" and trim.
+        const cleanLabel = label.replace(/:\s*\d+\s*$/, "").trim();
+        rows.push({ label: cleanLabel, phone, category });
+      });
+    }
+  });
+  return rows;
 }
