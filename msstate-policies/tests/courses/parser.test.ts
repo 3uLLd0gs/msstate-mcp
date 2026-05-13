@@ -216,3 +216,48 @@ describe("extractNonCourse — preserves existing patterns (regression guard)", 
     assert.ok(p.non_course.some((s) => /senior standing/i.test(s)));
   });
 });
+
+describe("inferMinGrade — Section 2 (broader phrasings)", () => {
+  test("'C or better in CSE 3183' (existing format) → 'C'", () => {
+    const p = parsePrereqProse("(Prerequisites: C or better in CSE 3183)");
+    assert.equal(p?.min_grade, "C");
+  });
+  test("'a C or better' → 'C'", () => {
+    const p = parsePrereqProse("(Prerequisites: a C or better in CSE 3183)");
+    assert.equal(p?.min_grade, "C");
+  });
+  test("'grade of C or better' → 'C'", () => {
+    const p = parsePrereqProse("(Prerequisites: grade of C or better in CSE 3183)");
+    assert.equal(p?.min_grade, "C");
+  });
+  test("'minimum grade of C' → 'C'", () => {
+    const p = parsePrereqProse("(Prerequisites: minimum grade of C in CSE 3183)");
+    assert.equal(p?.min_grade, "C");
+  });
+  test("'earning a C' → 'C'", () => {
+    const p = parsePrereqProse("(Prerequisites: CSE 3183 with earning a C)");
+    assert.equal(p?.min_grade, "C");
+  });
+  test("'with a C or better' → 'C'", () => {
+    const p = parsePrereqProse("(Prerequisites: CSE 3183 with a C or better)");
+    assert.equal(p?.min_grade, "C");
+  });
+  test("'minimum B grade' → 'B'", () => {
+    const p = parsePrereqProse("(Prerequisites: minimum B grade in CSE 3183)");
+    assert.equal(p?.min_grade, "B");
+  });
+
+  // False-positive guards
+  test("'in CSE 3183 and ECE 3714' (no grade phrase) → null", () => {
+    const p = parsePrereqProse("(Prerequisites: in CSE 3183 and ECE 3714)");
+    assert.equal(p?.min_grade, null);
+  });
+  test("'A score of 70%' (A is not a grade here) → null", () => {
+    const p = parsePrereqProse("(Prerequisites: A score of 70% on the placement exam)");
+    assert.equal(p?.min_grade, null);
+  });
+  test("'with a B' (no 'or better', genuinely ambiguous) → null", () => {
+    const p = parsePrereqProse("(Prerequisites: CSE 3183 with a B)");
+    assert.equal(p?.min_grade, null);
+  });
+});

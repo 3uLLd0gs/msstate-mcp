@@ -75,9 +75,25 @@ function inferLogic(clause: string): "or" | "and" | "mixed" | null {
   return null;
 }
 
+/** Prioritized list of grade-phrasing patterns. First match wins.
+ *  The captured letter is restricted to [A-D] to avoid false positives on
+ *  standalone letters (e.g., "E" in "ECE 3714"). The third pattern's
+ *  leading `[^A-Z]` guards against grabbing the first letter of a course prefix. */
+const GRADE_PATTERNS: readonly RegExp[] = [
+  /minimum\s+grade\s+of\s+(?:an?\s+)?([A-D])\b/i,
+  /grade\s+of\s+(?:an?\s+)?([A-D])\s+or\s+better/i,
+  /(?:^|[^A-Z])(?:an?\s+)?([A-D])\s+or\s+better/,
+  /minimum\s+(?:an?\s+)?([A-D])\s+grade/i,
+  /earning\s+(?:an?\s+)?([A-D])\b/i,
+  /with\s+(?:an?\s+)?([A-D])\s+or\s+better/i,
+];
+
 function inferMinGrade(clause: string): Prereq["min_grade"] {
-  const m = /Grade of ([ABCD])(?:\s+or\s+better)?/i.exec(clause);
-  return m ? (m[1].toUpperCase() as Prereq["min_grade"]) : null;
+  for (const rx of GRADE_PATTERNS) {
+    const m = rx.exec(clause);
+    if (m) return m[1].toUpperCase() as Prereq["min_grade"];
+  }
+  return null;
 }
 
 function extractNonCourse(clause: string): string[] {
