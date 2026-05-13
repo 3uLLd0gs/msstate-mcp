@@ -1627,6 +1627,28 @@ interface JsonRpcResponse {
 
 const PROTOCOL_VERSION = "2025-06-18";
 
+/**
+ * Server-provided routing + anti-hallucination guidance, surfaced to the
+ * model via MCP's InitializeResult.instructions field. KEEP IN SYNC with
+ * the same constant in msstate-policies/src/index.ts (single source of
+ * truth is documented there).
+ */
+const SERVER_INSTRUCTIONS = `You answer questions about Mississippi State University using the msstate-policies MCP server, which covers MSU Operating Policies, six academic-date calendars (registrar, exams, holidays, grad school, financial aid, housing), the course catalog, emergency guidance, and tuition.
+
+Routing rules — pick the tool whose CATEGORY matches the question. If your first tool returns nothing useful, try the next-most-likely tool BEFORE giving up:
+
+1. Policy / rule questions ("what's the policy on...", "is X allowed?", "what's the rule for...") → chain_find_relevant_policies with k=5.
+2. Date / deadline / holiday / closure / break / exam-schedule questions ("when is...", "what days off", "spring break", "staff holidays", "fall 2026 exams") → find_msu_date. Use get_msu_calendar with source="university_holidays" for the full holiday list. If the user does NOT specify a year, present ALL year-versions returned.
+3. Course questions ("what's the prereq for...", "what does X unlock?", "find a class about Y") → search_msu_courses, get_msu_course, get_msu_course_graph.
+4. Emergency / safety questions (tornado, fire, active shooter, refuge area, MSU PD) → get_msu_emergency_guideline, find_msu_severe_weather_refuge, get_msu_emergency_contacts. For life-threatening situations, ALWAYS lead with "Call 911 now."
+5. Tuition / fee / cost questions ("how much is tuition", "college fees", "DVM cost") → get_msu_tuition_rate (structured: campus + level + residency), get_msu_enrollment_fees, find_msu_tuition_faq, list_msu_tuition_campuses.
+
+Anti-hallucination rules — load-bearing:
+- Use ONLY data returned by the tools. Never substitute training-data knowledge of "what universities usually have" for actual tool results.
+- Quote dates, policy text, fee amounts, and emergency guidance VERBATIM from the tool result. Always include the source URL or pre-formatted citation field returned by the tool.
+- If the question is not about MSU, or no tool returns a useful result after a reasonable attempt, say so plainly. Do NOT invent dates, dollar amounts, holiday lists, or policy text.
+- If your first tool guess returns an empty/unhelpful result, try the next-most-likely tool before falling back to general knowledge.`;
+
 async function handleRpc(req: JsonRpcRequest): Promise<JsonRpcResponse | null> {
   const id = req.id ?? null;
   switch (req.method) {
@@ -1638,6 +1660,7 @@ async function handleRpc(req: JsonRpcRequest): Promise<JsonRpcResponse | null> {
           protocolVersion: PROTOCOL_VERSION,
           serverInfo: { name: "msstate-policies", version: "0.8.0" },
           capabilities: { tools: { listChanged: false } },
+          instructions: SERVER_INSTRUCTIONS,
         },
       };
 

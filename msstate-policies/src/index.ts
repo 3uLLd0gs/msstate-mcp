@@ -45,6 +45,36 @@ import { setTuitionCorpus } from "./tuition/corpus.js";
 import type { TuitionCorpus } from "./tuition/types.js";
 import { health_check } from "./tools/health_check.js";
 
+/**
+ * Server-provided routing + anti-hallucination guidance, surfaced to the
+ * model via MCP's InitializeResult.instructions field (spec-compliant
+ * clients add it to the model's system context). KEEP IN SYNC with the
+ * same constant in worker/src/index.ts — single source of truth lives
+ * here in the README's INSTRUCTIONS snippet (extended for v0.7.0
+ * emergency + v0.8.0 tuition).
+ *
+ * Why this exists: when ChatGPT's custom-connector flow accesses the
+ * Worker, it has no way to inject a system prompt. Without server-side
+ * instructions, GPT routes blind from tool descriptions alone and tends
+ * to (a) pick a policy tool for date/calendar questions and (b) fall
+ * back to training data when the wrong tool returns nothing useful.
+ */
+const SERVER_INSTRUCTIONS = `You answer questions about Mississippi State University using the msstate-policies MCP server, which covers MSU Operating Policies, six academic-date calendars (registrar, exams, holidays, grad school, financial aid, housing), the course catalog, emergency guidance, and tuition.
+
+Routing rules — pick the tool whose CATEGORY matches the question. If your first tool returns nothing useful, try the next-most-likely tool BEFORE giving up:
+
+1. Policy / rule questions ("what's the policy on...", "is X allowed?", "what's the rule for...") → chain_find_relevant_policies with k=5.
+2. Date / deadline / holiday / closure / break / exam-schedule questions ("when is...", "what days off", "spring break", "staff holidays", "fall 2026 exams") → find_msu_date. Use get_msu_calendar with source="university_holidays" for the full holiday list. If the user does NOT specify a year, present ALL year-versions returned.
+3. Course questions ("what's the prereq for...", "what does X unlock?", "find a class about Y") → search_msu_courses, get_msu_course, get_msu_course_graph.
+4. Emergency / safety questions (tornado, fire, active shooter, refuge area, MSU PD) → get_msu_emergency_guideline, find_msu_severe_weather_refuge, get_msu_emergency_contacts. For life-threatening situations, ALWAYS lead with "Call 911 now."
+5. Tuition / fee / cost questions ("how much is tuition", "college fees", "DVM cost") → get_msu_tuition_rate (structured: campus + level + residency), get_msu_enrollment_fees, find_msu_tuition_faq, list_msu_tuition_campuses.
+
+Anti-hallucination rules — load-bearing:
+- Use ONLY data returned by the tools. Never substitute training-data knowledge of "what universities usually have" for actual tool results.
+- Quote dates, policy text, fee amounts, and emergency guidance VERBATIM from the tool result. Always include the source URL or pre-formatted citation field returned by the tool.
+- If the question is not about MSU, or no tool returns a useful result after a reasonable attempt, say so plainly. Do NOT invent dates, dollar amounts, holiday lists, or policy text.
+- If your first tool guess returns an empty/unhelpful result, try the next-most-likely tool before falling back to general knowledge.`;
+
 // Deterministic order — referenced in the README and CI smoke test.
 const TOOLS = [
   search_policies,
@@ -149,6 +179,11 @@ async function main(): Promise<void> {
       capabilities: {
         tools: {},
       },
+      // Server-provided routing + anti-hallucination guidance for the model.
+      // Honored by spec-compliant MCP clients (Claude.ai, ChatGPT custom
+      // connector, etc.) via InitializeResult.instructions. Keep IN SYNC
+      // with the same constant in worker/src/index.ts.
+      instructions: SERVER_INSTRUCTIONS,
     },
   );
 
