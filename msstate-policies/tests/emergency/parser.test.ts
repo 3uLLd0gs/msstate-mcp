@@ -40,4 +40,14 @@ describe("parseGuidelineHtml", () => {
     assert.equal(r?.slug, "severe-weather-tornado");
     assert.equal(r?.url, "https://www.emergency.msstate.edu/guidelines/severe-weather-tornado");
   });
+  test("falls back to plain h1 when h1.page-title is absent", () => {
+    const html = `<!doctype html><html><body>
+    <main>
+      <h1>Plain Heading Only</h1>
+      <p>Body text that is long enough to qualify.</p>
+    </main>
+  </body></html>`;
+    const r = parseGuidelineHtml(html, "test-slug");
+    assert.equal(r?.title, "Plain Heading Only");
+  });
 });

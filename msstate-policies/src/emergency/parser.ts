@@ -10,6 +10,7 @@
  * scraper attaches those.
  */
 import { load as cheerioLoad } from "cheerio";
+import type { Element } from "domhandler";
 import type { GuidelineRow, RefugeRow, ContactRow } from "./types.js";
 
 const EMERGENCY_HOST = "https://www.emergency.msstate.edu";
@@ -18,8 +19,8 @@ type CheerioAPI = ReturnType<typeof cheerioLoad>;
 
 /** Walk a single element to a 1-N markdown line block. Headings -> "## H";
  *  <ul>/<ol> -> "- item" lines; <p> and other -> plain text line(s). */
-function nodeToMarkdown($: CheerioAPI, el: any): string[] {
-  const tag = (el.tagName ?? el.name ?? "").toLowerCase();
+function nodeToMarkdown($: CheerioAPI, el: Element): string[] {
+  const tag = (el.tagName ?? "").toLowerCase();
   const text = $(el).text().trim().replace(/\s+/g, " ");
   if (!text && tag !== "ul" && tag !== "ol") return [];
   if (/^h[1-6]$/.test(tag)) {
@@ -53,7 +54,7 @@ export function parseGuidelineHtml(
 
   const blocks: string[] = [];
   main.find("> *, > div > *").each((_, el) => {
-    const t = (el as any).tagName?.toLowerCase?.();
+    const t = ((el as Element).tagName ?? "").toLowerCase();
     if (t === "h1") return; // title already captured
     const md = nodeToMarkdown($, el);
     for (const line of md) blocks.push(line);
