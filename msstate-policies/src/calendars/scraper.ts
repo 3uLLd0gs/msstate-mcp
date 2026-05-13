@@ -16,9 +16,6 @@
  */
 import pdfParse from "pdf-parse/lib/pdf-parse.js";
 import { httpGet as defaultHttpGet } from "../http.js";
-type HttpGet = typeof defaultHttpGet;
-let httpGet: HttpGet = defaultHttpGet;
-export function __setHttpGetForTests(fn: HttpGet): void { httpGet = fn; }
 import { log } from "../log.js";
 import {
   CALENDAR_URLS,
@@ -41,6 +38,11 @@ import {
   parseGradPdfText,
   type GradPdfEntry,
 } from "./parsers/pdf_calendar.js";
+
+type HttpGet = typeof defaultHttpGet;
+let httpGet: HttpGet = defaultHttpGet;
+export function __setHttpGetForTests(fn: HttpGet): void { httpGet = fn; }
+export function __resetHttpGetForTests(): void { httpGet = defaultHttpGet; }
 
 const SUB_FETCH_CONCURRENCY = 4;
 const HTML_TIMEOUT_MS = 15_000;
@@ -170,6 +172,7 @@ async function scrapeTermB(source: TermPageSource): Promise<ScrapeResult> {
           return { rows: parseTermPage(body, source, entry), warning: null as string | null };
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
+          // last-writer-wins under Promise.all concurrency — any representative error suffices
           lastError = msg;
           log("warn", "term page fetch failed", { source, url: entry.url, err: msg });
           return { rows: [] as CalendarRow[], warning: `${entry.url}: ${msg}` };
@@ -240,6 +243,7 @@ async function scrapeGradD(): Promise<ScrapeResult> {
           return { rows: parseGradPdfText(parsed.text, entry), warning: null as string | null };
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
+          // last-writer-wins under Promise.all concurrency — any representative error suffices
           lastError = msg;
           log("warn", "grad PDF fetch/parse failed", { url: entry.url, err: msg });
           return { rows: [] as CalendarRow[], warning: `${entry.url}: ${msg}` };
