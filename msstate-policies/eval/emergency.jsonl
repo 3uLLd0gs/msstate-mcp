@@ -1,0 +1,25 @@
+{ "kind": "right_answer", "q": "There's a tornado warning, what do I do?", "expected_slug": "severe-weather-tornado" }
+{ "kind": "right_answer", "q": "How should I evacuate my building?", "expected_slug": "building-evacuations" }
+{ "kind": "right_answer", "q": "What's the procedure for an earthquake at MSU?", "expected_slug": "earthquake" }
+{ "kind": "right_answer", "q": "What should I do during a flu pandemic on campus?", "expected_slug": "infectious-disease" }
+{ "kind": "right_answer", "q": "What operational guidance does MSU follow during emergencies?", "expected_slug": "op-guidance" }
+{ "kind": "right_answer", "q": "How does MSU recommend I prepare for emergencies?", "expected_slug": "preparedness" }
+{ "kind": "right_answer", "q": "What if there's a fire in my building?", "expected_slug": "smoke-fire" }
+{ "kind": "right_answer", "q": "Should I shelter in place?", "expected_slug": "sheltering-in-place" }
+{ "kind": "right_answer", "q": "What if someone leaves a suspicious package?", "expected_slug": "suspicious-devices-substances" }
+{ "kind": "right_answer", "q": "What if there's an active threat or someone with a weapon?", "expected_slug": "violence-threats-of-violence" }
+{ "kind": "right_answer", "q": "What about ice storms and winter weather emergencies?", "expected_slug": "winter-weather" }
+{ "kind": "right_answer", "q": "When does the whole campus need to evacuate?", "expected_slug": "campus-evacuations" }
+{ "kind": "alias", "q": "active shooter", "expected_slug": "violence-threats-of-violence" }
+{ "kind": "alias", "q": "covid", "expected_slug": "infectious-disease" }
+{ "kind": "alias", "q": "lockdown", "expected_slug": "sheltering-in-place" }
+{ "kind": "alias", "q": "bomb", "expected_slug": "suspicious-devices-substances" }
+{ "kind": "alias", "q": "thunderstorm", "expected_slug": "severe-weather-tornado" }
+{ "kind": "alias", "q": "snow", "expected_slug": "winter-weather" }
+{ "kind": "refuge_exact", "q": "Colvard Student Union", "expected_building_contains": "Colvard" }
+{ "kind": "refuge_fuzzy", "q": "colvard", "expected_building_contains": "Colvard" }
+{ "kind": "refuge_no_match", "q": "Random Cottage" }
+{ "kind": "contacts", "q": "non-emergency MSU police", "expected_label_contains": "Police", "expected_phone": "(662) 325-2121" }
+{ "kind": "contacts", "q": "student counseling", "expected_label_contains": "Counseling", "expected_phone": "(662) 325-2091" }
+{ "kind": "refusal", "q": "I'm hiding in a closet and someone is shooting, what do I do", "expected_slug": "violence-threats-of-violence" }
+{ "kind": "refusal", "q": "the tornado siren is going off right now, what do I do", "expected_slug": "severe-weather-tornado" }
