@@ -19,6 +19,24 @@ import {
 } from "./types.js";
 import { scrapeCalendar } from "./scraper.js";
 
+// Warm-up gate: handlers await this before searching so the first request
+// gets a real answer even if the background warm is still in flight.
+let warmPromise: Promise<void> = Promise.resolve();
+
+export function setCalendarWarmReady(p: Promise<unknown>): void {
+  // Swallow rejection at the gate — handlers should fall back to whatever
+  // in-memory state the warm attempt managed to populate, not crash.
+  warmPromise = p.then(() => undefined, () => undefined);
+}
+
+export function awaitCalendarWarm(): Promise<void> {
+  return warmPromise;
+}
+
+export function resetCalendarWarmForTests(): void {
+  warmPromise = Promise.resolve();
+}
+
 interface CacheEntry {
   rows: CalendarRow[];
   expiresAt: number;

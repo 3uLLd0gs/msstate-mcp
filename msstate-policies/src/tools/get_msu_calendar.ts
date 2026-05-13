@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { CALENDAR_SOURCES, CALENDAR_URLS, type CalendarRow } from "../calendars/types.js";
+import { awaitCalendarWarm } from "../calendars/corpus.js";
 
 const GetMsuCalendarInput = z
   .object({
@@ -26,6 +27,7 @@ export const get_msu_calendar = {
   zodSchema: GetMsuCalendarInput,
   async handler(rawInput: unknown) {
     const input = GetMsuCalendarInput.parse(rawInput);
+    await awaitCalendarWarm();
     const filter = input.term?.toLowerCase();
     const rows = allRows
       .filter((r) => r.source === input.source)
