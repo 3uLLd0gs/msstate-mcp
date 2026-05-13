@@ -528,6 +528,228 @@ function walkGraph(
   };
 }
 
+// ---- emergency block --------------------------------------------------------
+
+interface GuidelineRow {
+  slug: string;
+  title: string;
+  url: string;
+  body_markdown: string;
+  aliases: string[];
+  retrieved_at: string;
+}
+interface RefugeRow {
+  building: string;
+  area: string;
+  note: string | null;
+  source_url: string;
+  retrieved_at: string;
+}
+type ContactCategory = "emergency" | "campus_non_emergency" | "off_campus_non_emergency";
+interface ContactRow {
+  label: string;
+  phone: string;
+  category: ContactCategory;
+  source_url: string;
+  retrieved_at: string;
+}
+interface EmergencyCorpus {
+  builtAt: string;
+  source: string;
+  guidelines: GuidelineRow[];
+  refuge_areas: RefugeRow[];
+  contacts: ContactRow[];
+}
+
+const EMERGENCY: EmergencyCorpus | null =
+  (corpus as { emergency?: EmergencyCorpus }).emergency ?? null;
+
+const MANDATORY_DISCLAIMER =
+  "If this is a life-threatening emergency, call 911 now (or MSU PD at 662-325-2121).";
+
+const EMERGENCY_ALIASES: Record<string, string> = {
+  "tornado": "severe-weather-tornado",
+  "severe weather": "severe-weather-tornado",
+  "thunderstorm": "severe-weather-tornado",
+  "shooter": "violence-threats-of-violence",
+  "active shooter": "violence-threats-of-violence",
+  "violence": "violence-threats-of-violence",
+  "fire": "smoke-fire",
+  "smoke": "smoke-fire",
+  "evacuate": "building-evacuations",
+  "evacuation": "building-evacuations",
+  "shelter": "sheltering-in-place",
+  "shelter in place": "sheltering-in-place",
+  "lockdown": "sheltering-in-place",
+  "earthquake": "earthquake",
+  "covid": "infectious-disease",
+  "pandemic": "infectious-disease",
+  "flu": "infectious-disease",
+  "ice storm": "winter-weather",
+  "snow": "winter-weather",
+  "winter": "winter-weather",
+  "bomb": "suspicious-devices-substances",
+  "suspicious package": "suspicious-devices-substances",
+  "prepare": "preparedness",
+  "preparation": "preparedness",
+};
+
+const EMG_FIELD_WEIGHTS = { title: 3, slug: 2, body: 1, alias: 4 } as const;
+const EMG_BM25_K1 = 1.2;
+const EMG_BM25_B = 0.75;
+
+interface EmgDoc {
+  row: GuidelineRow;
+  titleTokens: string[];
+  slugTokens: string[];
+  bodyTokens: string[];
+  aliasTokens: string[];
+  dl: number;
+}
+
+const EMG_DOCS: EmgDoc[] = (EMERGENCY?.guidelines ?? []).map((row) => {
+  const titleTokens = tokenize(row.title);
+  const slugTokens = tokenize(row.slug);
+  const bodyTokens = tokenize(row.body_markdown.slice(0, 200));
+  const aliasTokens = tokenize(row.aliases.join(" "));
+  return {
+    row, titleTokens, slugTokens, bodyTokens, aliasTokens,
+    dl: titleTokens.length + slugTokens.length + bodyTokens.length + aliasTokens.length,
+  };
+});
+
+const EMG_DF = new Map<string, number>();
+let EMG_AVG_LEN = 0;
+{
+  let total = 0;
+  for (const d of EMG_DOCS) {
+    total += d.dl;
+    const seen = new Set<string>();
+    for (const t of [...d.titleTokens, ...d.slugTokens, ...d.bodyTokens, ...d.aliasTokens]) {
+      if (seen.has(t)) continue;
+      seen.add(t);
+      EMG_DF.set(t, (EMG_DF.get(t) ?? 0) + 1);
+    }
+  }
+  EMG_AVG_LEN = EMG_DOCS.length > 0 ? total / EMG_DOCS.length : 0;
+}
+
+function emgIdf(token: string): number {
+  const n = EMG_DOCS.length;
+  const dfi = EMG_DF.get(token) ?? 0;
+  if (dfi === 0 || n === 0) return 0;
+  return Math.log(1 + (n - dfi + 0.5) / (dfi + 0.5));
+}
+
+function emgBm25(tf: number, dl: number, idfV: number): number {
+  if (tf <= 0) return 0;
+  const denom = tf + EMG_BM25_K1 * (1 - EMG_BM25_B + (EMG_BM25_B * dl) / (EMG_AVG_LEN || 1));
+  return idfV * ((tf * (EMG_BM25_K1 + 1)) / denom);
+}
+
+function emgBm25Search(query: string): { row: GuidelineRow; score: number }[] {
+  const qTokens = tokenize(query);
+  if (qTokens.length === 0) return [];
+  const out: { row: GuidelineRow; score: number }[] = [];
+  for (const d of EMG_DOCS) {
+    let s = 0;
+    for (const q of qTokens) {
+      const idfQ = emgIdf(q);
+      if (idfQ === 0) continue;
+      s += EMG_FIELD_WEIGHTS.title * emgBm25(countOf(q, d.titleTokens), d.dl, idfQ);
+      s += EMG_FIELD_WEIGHTS.slug  * emgBm25(countOf(q, d.slugTokens),  d.dl, idfQ);
+      s += EMG_FIELD_WEIGHTS.body  * emgBm25(countOf(q, d.bodyTokens),  d.dl, idfQ);
+      s += EMG_FIELD_WEIGHTS.alias * emgBm25(countOf(q, d.aliasTokens), d.dl, idfQ);
+    }
+    if (s > 0) out.push({ row: d.row, score: s });
+  }
+  out.sort((a, b) => b.score - a.score);
+  return out;
+}
+
+interface EmgResolveResult {
+  matched: GuidelineRow | null;
+  via: "exact_slug" | "alias" | "bm25" | "none";
+  did_you_mean: GuidelineRow[];
+  suggestions: GuidelineRow[];
+}
+
+function resolveEmergencyGuideline(input: string): EmgResolveResult {
+  const norm = (input ?? "").toLowerCase().trim();
+  const all = EMERGENCY?.guidelines ?? [];
+  if (!norm || all.length === 0) {
+    return { matched: null, via: "none", did_you_mean: [], suggestions: all };
+  }
+  const exact = all.find((g) => g.slug === norm);
+  if (exact) return { matched: exact, via: "exact_slug", did_you_mean: [], suggestions: [] };
+  const aliasSlug = EMERGENCY_ALIASES[norm];
+  if (aliasSlug) {
+    const row = all.find((g) => g.slug === aliasSlug);
+    if (row) return { matched: row, via: "alias", did_you_mean: [], suggestions: [] };
+  }
+  const hits = emgBm25Search(norm);
+  if (hits.length === 0) return { matched: null, via: "none", did_you_mean: [], suggestions: all };
+  return { matched: hits[0].row, via: "bm25", did_you_mean: hits.slice(1, 3).map((h) => h.row), suggestions: [] };
+}
+
+function findEmergencyRefuge(input: string): RefugeRow[] {
+  const rows = EMERGENCY?.refuge_areas ?? [];
+  const norm = (input ?? "").toLowerCase().trim();
+  if (!norm || rows.length === 0) return [];
+  const sub = rows.filter((r) => r.building.toLowerCase().includes(norm));
+  if (sub.length > 0) return sub;
+  const qTokens = tokenize(norm);
+  if (qTokens.length === 0) return [];
+  const docs = rows.map((r) => ({ row: r, tokens: tokenize(r.building) }));
+  const df = new Map<string, number>();
+  let total = 0;
+  for (const d of docs) {
+    total += d.tokens.length;
+    const seen = new Set<string>();
+    for (const t of d.tokens) {
+      if (seen.has(t)) continue;
+      seen.add(t);
+      df.set(t, (df.get(t) ?? 0) + 1);
+    }
+  }
+  const avg = docs.length > 0 ? total / docs.length : 0;
+  function idfR(t: string): number {
+    const n = docs.length;
+    const dfi = df.get(t) ?? 0;
+    if (dfi === 0 || n === 0) return 0;
+    return Math.log(1 + (n - dfi + 0.5) / (dfi + 0.5));
+  }
+  const scored: { row: RefugeRow; score: number }[] = [];
+  for (const d of docs) {
+    let s = 0;
+    for (const q of qTokens) {
+      const idfQ = idfR(q);
+      if (idfQ === 0) continue;
+      const tf = countOf(q, d.tokens);
+      if (tf <= 0) continue;
+      const denom = tf + EMG_BM25_K1 * (1 - EMG_BM25_B + (EMG_BM25_B * d.tokens.length) / (avg || 1));
+      s += idfQ * ((tf * (EMG_BM25_K1 + 1)) / denom);
+    }
+    if (s > 0) scored.push({ row: d.row, score: s });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map((s) => s.row);
+}
+
+function filterEmergencyContacts(categoryInput: string): ContactRow[] {
+  const rows = EMERGENCY?.contacts ?? [];
+  const map: Record<string, ContactCategory | "all"> = {
+    all: "all",
+    emergency: "emergency",
+    campus: "campus_non_emergency",
+    off_campus: "off_campus_non_emergency",
+  };
+  const want = map[(categoryInput ?? "all").toLowerCase().trim()];
+  if (!want) return [];
+  if (want === "all") return rows.slice();
+  return rows.filter((c) => c.category === want);
+}
+
 // ---- Helpers ----------------------------------------------------------------
 
 function findPolicy(numberOrSlug?: string, url?: string): Policy | undefined {
