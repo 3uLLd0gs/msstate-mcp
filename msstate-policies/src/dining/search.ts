@@ -77,6 +77,20 @@ export interface FuzzyResolveResult {
   did_you_mean: Array<{ slug: string; name: string }>;
 }
 
+/**
+ * Check if a single compact query token (e.g. "chickfila") matches a location
+ * by testing whether the joined slug/name tokens contain it as a substring,
+ * or it contains the joined tokens as a substring.
+ * Only applied when the query is a single token of length >= 4 to avoid false positives
+ * from short tokens (e.g. "a", "in") being substrings of many words.
+ */
+function compactQueryScore(q: string, arr: string[]): number {
+  if (q.length < 4) return 0;
+  const joined = arr.join("");
+  if (joined.includes(q) || q.includes(joined)) return 1;
+  return 0;
+}
+
 export function fuzzyResolveLocation(
   locations: DiningLocation[],
   query: string,
@@ -89,8 +103,15 @@ export function fuzzyResolveLocation(
     const nameT = tokenize(l.name);
     let score = 0;
     for (const q of qTokens) {
+      // Exact token match (higher weight)
       score += 4 * countOf(q, slugT);
       score += 3 * countOf(q, nameT);
+    }
+    // Compact-query substring match: e.g. "chickfila" -> joined slug "chickfila"
+    // Only when the entire query is a single token (no spaces/separators from user)
+    if (score === 0 && qTokens.length === 1) {
+      score += 2 * compactQueryScore(qTokens[0], slugT);
+      score += 1 * compactQueryScore(qTokens[0], nameT);
     }
     return { l, score };
   }).filter((x) => x.score > 0);
