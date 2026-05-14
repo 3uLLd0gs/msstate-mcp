@@ -113,3 +113,38 @@ describe("parseProgramHtml — phcse (advisingBlock contacts + cowbell tuition)"
     assert.ok(!result.parse_warnings.includes("no_contacts_extracted"));
   });
 });
+
+// v1.0.1: prioritized admissions heading match (avoid "Direct Admission" capture).
+describe("parseProgramHtml — phchemeng (admissions heading priority)", () => {
+  const html = fixture("program-phchemeng.html");
+  const result = parseProgramHtml(html, "phchemeng", "doctoral", "https://www.online.msstate.edu/phchemeng");
+
+  test("admission_requirements does NOT start with degree-plan coursework text", () => {
+    const ar = (result.admission_requirements ?? "").trim();
+    assert.ok(ar.length > 0, "admission_requirements is empty");
+    assert.ok(
+      !/^CHE\s+XXXX\s+Graduate-level coursework/i.test(ar),
+      `admission_requirements wrongly resolves to degree-plan text: ${JSON.stringify(ar.slice(0, 80))}`,
+    );
+  });
+});
+
+// v1.0.1: short_description sourcing — prefer index, fall back to col-md-8 paragraph.
+describe("parseProgramHtml — short_description sourcing", () => {
+  test("uses index short_description when supplied (highest priority)", () => {
+    const html = fixture("program-mba.html");
+    const result = parseProgramHtml(
+      html,
+      "mba",
+      "master",
+      "https://www.online.msstate.edu/mba",
+      "Index-curated MBA marketing blurb.",
+    );
+    assert.equal(result.short_description, "Index-curated MBA marketing blurb.");
+  });
+  test("falls back to col-md-8 paragraph when index description is missing", () => {
+    const html = fixture("program-mba.html");
+    const result = parseProgramHtml(html, "mba", "master", "https://www.online.msstate.edu/mba");
+    assert.ok(result.short_description.length >= 20, `short_description: ${JSON.stringify(result.short_description)}`);
+  });
+});

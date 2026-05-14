@@ -56,6 +56,7 @@ export interface ProgramIndexEntry {
   slug: string;
   name: string;
   degree_level: DegreeLevel;
+  short_description: string;
 }
 
 /**
@@ -101,8 +102,15 @@ export function parseAcademicProgramsIndex(
     }
     if (degree_level === null) return;
 
+    const short_description = $card
+      .find("div.Prg-card-description p")
+      .first()
+      .text()
+      .replace(/\s+/g, " ")
+      .trim();
+
     seenSlugs.add(slug);
-    out.push({ slug, name, degree_level });
+    out.push({ slug, name, degree_level, short_description });
   });
 
   return out;
@@ -376,12 +384,19 @@ function extractForms(
   return out;
 }
 
+/**
+ * Find the first section whose heading matches a priority list of patterns.
+ * Patterns are tried in order — the first pattern that matches ANY heading
+ * wins, regardless of where that heading sits in the document. This avoids
+ * a more-specific pattern losing to an earlier heading that happens to match
+ * a broader fallback pattern.
+ */
 function findSectionByPattern(
   sections: Record<string, string>,
   patterns: RegExp[],
 ): string {
-  for (const [heading, body] of Object.entries(sections)) {
-    for (const p of patterns) {
+  for (const p of patterns) {
+    for (const [heading, body] of Object.entries(sections)) {
       if (p.test(heading)) return body;
     }
   }
@@ -398,6 +413,7 @@ export function parseProgramHtml(
   slug: string,
   degree_level: DegreeLevel,
   url: string,
+  indexShortDescription?: string,
 ): OnlineProgram {
   const $ = cheerioLoad(html);
   const root = contentRoot($);
@@ -410,8 +426,29 @@ export function parseProgramHtml(
 
   const sections = extractSections($);
 
-  const short_description =
-    $(`${root} h1`).first().nextAll("p").first().text().replace(/\s+/g, " ").trim();
+  // short_description priority:
+  //   1. The Prg-card description from the /academic-programs index (MSU-curated, authoritative).
+  //   2. The first substantive <p> in a `col-md-8` content column on the program page.
+  //   3. The h1's next-sibling <p> (rare — Drupal hero h1 has no sibling on current pages).
+  let short_description = (indexShortDescription ?? "").trim();
+  if (short_description.length < 20) {
+    $(`${root} div.col-md-8 > p`).each((_, p) => {
+      if (short_description.length >= 20) return;
+      const t = $(p).text().replace(/\s+/g, " ").trim();
+      if (t.length >= 20 && !/^\s*program\s+highlights/i.test(t)) {
+        short_description = t;
+      }
+    });
+  }
+  if (short_description.length === 0) {
+    short_description = $(`${root} h1`)
+      .first()
+      .nextAll("p")
+      .first()
+      .text()
+      .replace(/\s+/g, " ")
+      .trim();
+  }
 
   // Format: look for "fully online" or "100% online" or similar in the page
   const allText = $(root).text();
@@ -427,10 +464,15 @@ export function parseProgramHtml(
 
   const tuition = extractTuition($);
 
+  // Prioritized patterns: try the specific phrases first; the fallback is
+  // anchored at heading-start ("Admission..." / "Admissions...") so it does
+  // NOT match unrelated headings like "Direct Admission" or "Conditional
+  // Admission" which appear earlier in some degree-plan pages.
   const admission_requirements = findSectionByPattern(sections, [
     /admissions?\s+process/i,
     /admissions?\s+require/i,
-    /admission/i,
+    /how\s+to\s+apply/i,
+    /^\s*admissions?\b/i,
   ]);
 
   let contacts = extractContacts($);
