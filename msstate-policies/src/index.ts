@@ -43,6 +43,12 @@ import { find_msu_tuition_faq } from "./tools/find_msu_tuition_faq.js";
 import { list_msu_tuition_campuses } from "./tools/list_msu_tuition_campuses.js";
 import { setTuitionCorpus } from "./tuition/corpus.js";
 import type { TuitionCorpus } from "./tuition/types.js";
+import { list_online_programs } from "./tools/list_online_programs.js";
+import { get_online_program } from "./tools/get_online_program.js";
+import { get_online_admissions_process } from "./tools/get_online_admissions_process.js";
+import { find_online_info } from "./tools/find_online_info.js";
+import { setOnlineCorpus } from "./online/corpus.js";
+import type { OnlineCorpus } from "./online/types.js";
 import { health_check } from "./tools/health_check.js";
 
 /**
@@ -94,6 +100,10 @@ const TOOLS = [
   get_msu_enrollment_fees,
   find_msu_tuition_faq,
   list_msu_tuition_campuses,
+  list_online_programs,
+  get_online_program,
+  get_online_admissions_process,
+  find_online_info,
   health_check,
 ] as const;
 
@@ -112,6 +122,7 @@ declare const __GIT_SHA__: string | undefined;
 declare const __COURSE_CORPUS__: CourseCorpus | undefined;
 declare const __EMERGENCY_CORPUS__: EmergencyCorpus | undefined;
 declare const __TUITION_CORPUS__: TuitionCorpus | undefined;
+declare const __ONLINE_CORPUS__: OnlineCorpus | undefined;
 
 function safeVersion(): string {
   return typeof __VERSION__ !== "undefined" ? __VERSION__ : "";
@@ -156,6 +167,19 @@ function loadBakedTuitionCorpus(): void {
     });
   } else {
     log("warn", "no baked tuition corpus available; tuition tools will return empty results");
+  }
+}
+
+function loadBakedOnlineCorpus(): void {
+  if (typeof __ONLINE_CORPUS__ !== "undefined" && __ONLINE_CORPUS__) {
+    setOnlineCorpus(__ONLINE_CORPUS__);
+    log("info", "online corpus loaded", {
+      programs: __ONLINE_CORPUS__.programs.length,
+      staff: __ONLINE_CORPUS__.staff.length,
+      info_pages: __ONLINE_CORPUS__.info_pages.length,
+    });
+  } else {
+    log("warn", "no baked online corpus available; online tools will return empty results");
   }
 }
 
@@ -249,6 +273,7 @@ async function main(): Promise<void> {
   loadBakedCourseCorpus();
   loadBakedEmergencyCorpus();
   loadBakedTuitionCorpus();
+  loadBakedOnlineCorpus();
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
