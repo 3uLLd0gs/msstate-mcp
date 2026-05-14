@@ -113,7 +113,7 @@ if (suite === "courses") {
 
   const mcp = new CourseMcp();
   await mcp.init();
-  const out = { course_explain: { pass: 0, fail: 0 }, prereq_chain: { pass: 0, fail: 0 }, unlocks: { pass: 0, fail: 0 } };
+  const out = { course_explain: { pass: 0, fail: 0 }, prereq_chain: { pass: 0, fail: 0 }, unlocks: { pass: 0, fail: 0 }, prereq_non_course: { pass: 0, fail: 0 }, prereq_min_grade: { pass: 0, fail: 0 }, prereq_senior_standing: { pass: 0, fail: 0 } };
   const failures = [];
   for (const row of rows) {
     let ok = false;
@@ -138,6 +138,24 @@ if (suite === "courses") {
           ok = (row.expected_codes_subset ?? []).every((c) => codes.includes(c));
           detail = `got [${codes.slice(0, 8).join(", ")}]`;
         }
+      } else if (row.type === "prereq_non_course") {
+        const res = await mcp.callTool("get_msu_course", { code: row.code });
+        const parsed = JSON.parse(res.content[0].text);
+        const nonCourse = (parsed.course?.prereqs?.non_course ?? []);
+        ok = nonCourse.some((s) => s.includes(row.expected_non_course_contains));
+        detail = `non_course=[${nonCourse.join(", ")}]`;
+      } else if (row.type === "prereq_min_grade") {
+        const res = await mcp.callTool("get_msu_course", { code: row.code });
+        const parsed = JSON.parse(res.content[0].text);
+        const minGrade = parsed.course?.prereqs?.min_grade ?? null;
+        ok = minGrade === row.expected_min_grade;
+        detail = `min_grade=${minGrade}`;
+      } else if (row.type === "prereq_senior_standing") {
+        const res = await mcp.callTool("get_msu_course", { code: row.code });
+        const parsed = JSON.parse(res.content[0].text);
+        const nonCourse = (parsed.course?.prereqs?.non_course ?? []);
+        ok = nonCourse.some((s) => s.toLowerCase().includes("senior standing"));
+        detail = `non_course=[${nonCourse.join(", ")}]`;
       }
     } catch (err) {
       detail = `error: ${err.message}`;
@@ -155,18 +173,24 @@ if (suite === "courses") {
       course_explain: out.course_explain,
       prereq_chain: out.prereq_chain,
       unlocks: out.unlocks,
+      prereq_non_course: out.prereq_non_course,
+      prereq_min_grade: out.prereq_min_grade,
+      prereq_senior_standing: out.prereq_senior_standing,
     },
     rates: {
       course_explain: Number(rate("course_explain").toFixed(3)),
       prereq_chain: Number(rate("prereq_chain").toFixed(3)),
       unlocks: Number(rate("unlocks").toFixed(3)),
+      prereq_non_course: Number(rate("prereq_non_course").toFixed(3)),
+      prereq_min_grade: Number(rate("prereq_min_grade").toFixed(3)),
+      prereq_senior_standing: Number(rate("prereq_senior_standing").toFixed(3)),
     },
   };
   console.log(JSON.stringify(summary, null, 2));
   for (const f of failures.slice(0, 20)) console.error("FAIL", f.type, "|", f.q, "→", f.detail);
 
   // Thresholds per spec §1.
-  const thresholds = { course_explain: 0.9, prereq_chain: 0.95, unlocks: 0.95 };
+  const thresholds = { course_explain: 0.9, prereq_chain: 0.95, unlocks: 0.95, prereq_non_course: 1.0, prereq_min_grade: 1.0, prereq_senior_standing: 1.0 };
   let pass = true;
   for (const k of Object.keys(thresholds)) {
     if (total(k) > 0 && rate(k) < thresholds[k]) pass = false;

@@ -8,8 +8,11 @@
 //   { "type": "course_explain", "q": string, "expected_codes": [code] }
 //   { "type": "prereq_chain", "q": string, "root": code, "expected_codes_subset": [code, ...] }
 //   { "type": "unlocks", "q": string, "root": code, "expected_codes_subset": [code, ...] }
+//   { "type": "prereq_non_course", "q": string, "code": code, "expected_non_course_contains": string }
+//   { "type": "prereq_min_grade", "q": string, "code": code, "expected_min_grade": string }
+//   { "type": "prereq_senior_standing", "q": string, "code": code }
 //
-// Counts: course_explain=23, prereq_chain=14, unlocks=15
+// Counts: course_explain=23, prereq_chain=14, unlocks=15, prereq_non_course=1, prereq_min_grade=1, prereq_senior_standing=1
 {"type":"course_explain","q":"data communications and computer networks","expected_codes":["CSE 4153"]}
 {"type":"course_explain","q":"operating systems class","expected_codes":["CSE 4733"]}
 {"type":"course_explain","q":"data structures and analysis of algorithms","expected_codes":["CSE 2383"]}
@@ -62,3 +65,6 @@
 {"type":"unlocks","q":"what unlocks after CH 1213?","root":"CH 1213","expected_codes_subset":["ME 3513"]}
 {"type":"unlocks","q":"what unlocks after ACC 2013?","root":"ACC 2013","expected_codes_subset":["ACC 3013"]}
 {"type":"unlocks","q":"what unlocks after ACC 2023?","root":"ACC 2023","expected_codes_subset":["ACC 3013"]}
+{"type":"prereq_non_course","q":"What are the prereqs for MGT 3113?","code":"MGT 3113","expected_non_course_contains":"junior standing"}
+{"type":"prereq_min_grade","q":"What grade do I need in the prereqs for ACC 4033?","code":"ACC 4033","expected_min_grade":"C"}
+{"type":"prereq_senior_standing","q":"What are the requirements for AELC 6873?","code":"AELC 6873"}

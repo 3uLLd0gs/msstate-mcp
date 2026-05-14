@@ -481,8 +481,10 @@ async function scrapeTuitionViaSubprocess() {
 
 async function main() {
   const skipCatalog = process.argv.includes("--skip-catalog");
+  const skipCalendars = process.argv.includes("--skip-calendars");
   console.error("build-worker-corpus: fetching index...");
   if (skipCatalog) console.error("build-worker-corpus: --skip-catalog enabled (reusing courses block)");
+  if (skipCalendars) console.error("build-worker-corpus: --skip-calendars enabled (reusing calendar block from existing corpus)");
   const html = await fetchText(`${BASE}/current`);
   const $ = cheerioLoad(html);
 
@@ -567,12 +569,48 @@ async function main() {
     policies,
   };
 
-  const calendarPayload = await scrapeCalendarsViaSubprocess();
-  out.academic_calendar = {
-    rows: calendarPayload.rows,
-    per_source: calendarPayload.per_source,
-    built_at: builtAt,
-  };
+  // --skip-calendars is the escape hatch for MSU calendar 403/rate-limit
+  // flakiness (recurring intermittent failures on registrar/sfa term pages).
+  // Reuses the on-disk corpus's calendar block when set; fails loudly if
+  // nothing usable on disk so we never silently ship without a calendar.
+  // Symmetric to --skip-catalog. Use sparingly — calendar freshness should
+  // be reasserted on a healthy day before any release.
+  let calendarPayload;
+  if (skipCalendars) {
+    let existingCalendar;
+    try {
+      const prior = JSON.parse(readFileSync(outPath, "utf8"));
+      existingCalendar = prior.academic_calendar;
+    } catch (err) {
+      throw new Error(
+        `--skip-calendars requires an existing worker/corpus.json with a calendar block (read failed: ${err.message ?? err}) — refusing to ship a poisoned calendar corpus`,
+      );
+    }
+    if (!existingCalendar || !Array.isArray(existingCalendar.rows) || existingCalendar.rows.length === 0) {
+      throw new Error(
+        "--skip-calendars: existing worker/corpus.json has no usable calendar block — refusing to ship a poisoned calendar corpus",
+      );
+    }
+    console.error(
+      `[build-worker-corpus]   reusing existing calendar block (${existingCalendar.rows.length} rows, built_at ${existingCalendar.built_at ?? "?"})`,
+    );
+    calendarPayload = {
+      rows: existingCalendar.rows,
+      per_source: existingCalendar.per_source ?? {},
+    };
+    out.academic_calendar = {
+      rows: existingCalendar.rows,
+      per_source: existingCalendar.per_source ?? {},
+      built_at: existingCalendar.built_at ?? builtAt,
+    };
+  } else {
+    calendarPayload = await scrapeCalendarsViaSubprocess();
+    out.academic_calendar = {
+      rows: calendarPayload.rows,
+      per_source: calendarPayload.per_source,
+      built_at: builtAt,
+    };
+  }
 
   // Sanity guard: registrar term pages must yield at least one multi-day row.
   // If the extractor regresses to single-day-only, abort the build instead of
@@ -621,6 +659,74 @@ async function main() {
       forward_dag: coursesPayload.forward_dag,
       reverse_dag: coursesPayload.reverse_dag,
     };
+  }
+
+  // v0.9.0 — per-category parse-quality ceilings. Counts come from
+  // reparsing each record's raw_prose with the live parser so a corpus
+  // scraped under any prior parser still gets audited under the current
+  // rules. Each ceiling is ~10–15% above the current measured baseline,
+  // giving headroom for MSU markup drift while catching real regressions.
+  {
+    const { execFileSync } = await import("node:child_process");
+    const proseList = Object.values(out.courses.records)
+      .map((rec) => rec.prereqs?.raw_prose ?? null)
+      .filter(Boolean);
+    // tsx -e runs in CJS mode; use require() with an absolute path so the
+    // parser is resolved relative to process.cwd() regardless of where tsx
+    // itself lives in node_modules.
+    const inlineScript = `
+const path = require("path");
+const { parsePrereqProse } = require(path.join(process.cwd(), "msstate-policies/src/courses/parser.ts"));
+const proses = JSON.parse(process.argv[1]);
+const breakdown = {
+  non_course_unparsed: 0,
+  grade_signal_present_but_unparsed: 0,
+  grade_signal_ambiguous: 0,
+  logic_ambiguous: 0,
+};
+for (const prose of proses) {
+  const reparsed = parsePrereqProse(prose);
+  for (const w of (reparsed?.parse_warnings ?? [])) {
+    if (w in breakdown) breakdown[w]++;
+  }
+}
+process.stdout.write(JSON.stringify(breakdown));
+`.trim();
+    let breakdownRaw;
+    try {
+      breakdownRaw = execFileSync(
+        "npx",
+        ["--yes", "tsx", "-e", inlineScript, JSON.stringify(proseList)],
+        {
+          cwd: process.cwd(),
+          stdio: ["ignore", "pipe", "inherit"],
+          maxBuffer: 4 * 1024 * 1024,
+        },
+      );
+    } catch (err) {
+      throw new Error(
+        `courses: parse-quality audit subprocess failed (${err.message ?? err}) — refusing to ship a poisoned course corpus`,
+      );
+    }
+    const breakdown = JSON.parse(breakdownRaw.toString("utf8"));
+    console.error(
+      `[build-worker-corpus]   courses_parse_quality: non_course_unparsed=${breakdown.non_course_unparsed} grade_unparsed=${breakdown.grade_signal_present_but_unparsed} logic_ambiguous=${breakdown.logic_ambiguous}`,
+    );
+    if (breakdown.non_course_unparsed > 35) {
+      throw new Error(
+        `courses: non_course_unparsed=${breakdown.non_course_unparsed} > 35 — refusing to ship a poisoned course corpus`,
+      );
+    }
+    if (breakdown.grade_signal_present_but_unparsed > 20) {
+      throw new Error(
+        `courses: grade_signal_present_but_unparsed=${breakdown.grade_signal_present_but_unparsed} > 20 — refusing to ship a poisoned course corpus`,
+      );
+    }
+    if (breakdown.logic_ambiguous > 200) {
+      throw new Error(
+        `courses: logic_ambiguous=${breakdown.logic_ambiguous} > 200 — refusing to ship a poisoned course corpus`,
+      );
+    }
   }
 
   const emergencyPayload = await scrapeEmergencyViaSubprocess();

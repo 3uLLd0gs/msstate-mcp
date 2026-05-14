@@ -10,15 +10,51 @@
  *   When uncertain, set logic="mixed" and rely on raw_prose verbatim.
  */
 import { load as cheerioLoad } from "cheerio";
-import { COURSE_CODE_RE, type Course, type Prereq } from "./types.js";
+import { COURSE_CODE_RE, type Course, type Prereq, type PrereqWarning } from "./types.js";
 
 const COURSE_TOKEN_RE = /\b[A-Z]{2,4}\s\d{4}\b/g;
 const NON_COURSE_PATTERNS: Array<{ rx: RegExp; label: (m: RegExpExecArray) => string }> = [
+  // EXISTING — keep verbatim (regression-guarded by Task 2.1's "preserves existing patterns" block).
   { rx: /\bconsent of (?:the )?instructor\b/gi, label: () => "consent of instructor" },
   { rx: /\bpermission of (?:the )?(?:instructor|department head)\b/gi, label: (m) => m[0].toLowerCase() },
   { rx: /\b(junior|senior|graduate|sophomore|freshman) standing\b/gi, label: (m) => `${m[1].toLowerCase()} standing` },
   { rx: /\bACT\s+\d+\b/gi, label: (m) => m[0] },
   { rx: /\bSAT\s+\d+\b/gi, label: (m) => m[0] },
+
+  // NEW (v0.9.0) — broader permission/consent. Captures "permission/consent of <role>"
+  // including "permission of practicum director", "consent of the primary advisor", etc.
+  // Stops at AND/OR/punctuation so it doesn't gobble downstream clauses.
+  {
+    rx: /\b(permission|consent)\s+of\s+(?:the\s+)?([\w\s]+?)(?=\s+and\b|\s+or\b|[;.,)]|$)/gi,
+    label: (m) => `${m[1].toLowerCase()} of ${m[2].trim().toLowerCase()}`,
+  },
+
+  // NEW — admission status. "Admission to Teacher Education", etc.
+  // Captures "Admission to <Program>" where Program starts with a capital.
+  {
+    rx: /\bAdmission\s+to\s+(?:the\s+)?([A-Z][\w\s]+?)(?=\s+and\b|\s+or\b|[;.,)]|$)/g,
+    label: (m) => `Admission to ${m[1].trim()}`,
+  },
+
+  // NEW — hours-of-X. "Seven hours of biological science", "Thirty hours of BIO graduate work".
+  // The hour count can be written (Seven, Thirty) or numeric (7, 30).
+  {
+    rx: /\b((?:[A-Z][a-z]+(?:-[a-z]+)?|\d+))\s+hours?\s+of\s+([^,.()]+?)(?=\s+and\b|\s+or\b|[;.,)]|$)/gi,
+    label: (m) => `${m[1]} hours of ${m[2].trim()}`,
+  },
+
+  // NEW — completion of X. "Completion of any 1000-level history course",
+  // "Completion of all core Master of Public Health courses".
+  {
+    rx: /\bCompletion\s+of\s+([^,.()]+?)(?=\s+and\b|\s+or\b|[;.,)]|$)/gi,
+    label: (m) => `Completion of ${m[1].trim()}`,
+  },
+
+  // NEW — proficiency / skill. "Proficiency with spreadsheet software", "Proficiency in MATLAB".
+  {
+    rx: /\bProficiency\s+(?:with|in)\s+([^,.()]+?)(?=\s+and\b|\s+or\b|[;.,)]|$)/gi,
+    label: (m) => `Proficiency with ${m[1].trim()}`,
+  },
 ];
 
 function extractParenthesized(label: "Prerequisites" | "Corequisites", input: string): string | null {
@@ -39,9 +75,25 @@ function inferLogic(clause: string): "or" | "and" | "mixed" | null {
   return null;
 }
 
+/** Prioritized list of grade-phrasing patterns. First match wins.
+ *  The captured letter is restricted to [A-D] to avoid false positives on
+ *  standalone letters (e.g., "E" in "ECE 3714"). The third pattern's
+ *  leading `[^A-Z]` guards against grabbing the first letter of a course prefix. */
+const GRADE_PATTERNS: readonly RegExp[] = [
+  /minimum\s+grade\s+of\s+(?:an?\s+)?([A-D])\b/i,
+  /grade\s+of\s+(?:an?\s+)?([A-D])\s+or\s+better/i,
+  /(?:^|[^A-Z])(?:an?\s+)?([A-D])\s+or\s+better/,
+  /minimum\s+(?:an?\s+)?([A-D])\s+grade/i,
+  /earning\s+(?:an?\s+)?([A-D])\b/i,
+  /with\s+(?:an?\s+)?([A-D])\s+or\s+better/i,
+];
+
 function inferMinGrade(clause: string): Prereq["min_grade"] {
-  const m = /Grade of ([ABCD])(?:\s+or\s+better)?/i.exec(clause);
-  return m ? (m[1].toUpperCase() as Prereq["min_grade"]) : null;
+  for (const rx of GRADE_PATTERNS) {
+    const m = rx.exec(clause);
+    if (m) return m[1].toUpperCase() as Prereq["min_grade"];
+  }
+  return null;
 }
 
 function extractNonCourse(clause: string): string[] {
@@ -72,29 +124,61 @@ function uniqueCourseCodes(clause: string): string[] {
   return out;
 }
 
+const GRADE_TRIGGER_RE = /\b(grade|better|minimum|earning)\b/i;
+const NONE_EQUIVALENT_RE = /^\s*(none|n\/?a|see\s+description)\s*$/i;
+
+function computeWarnings(
+  clause: string,
+  required_courses: string[],
+  non_course: string[],
+  logic: Prereq["logic"],
+  min_grade: Prereq["min_grade"],
+): PrereqWarning[] {
+  // Treat "none"/"n/a"/"see description" as null-equivalent — no warning.
+  // Strip the leading "(Prerequisites: " label first.
+  const inner = clause.replace(/^\(\s*[A-Za-z]+:\s*/i, "").replace(/\)$/, "");
+  if (NONE_EQUIVALENT_RE.test(inner)) {
+    return [];
+  }
+
+  const warnings: PrereqWarning[] = [];
+
+  // non_course_unparsed: raw_prose has content but neither required_courses NOR non_course got anything.
+  if (required_courses.length === 0 && non_course.length === 0) {
+    warnings.push("non_course_unparsed");
+  }
+
+  // grade_signal_present_but_unparsed: grade-trigger word present, but inferMinGrade returned null.
+  if (min_grade === null && GRADE_TRIGGER_RE.test(clause)) {
+    warnings.push("grade_signal_present_but_unparsed");
+  }
+
+  // logic_ambiguous: parser marked composition as "mixed".
+  if (logic === "mixed") {
+    warnings.push("logic_ambiguous");
+  }
+
+  return warnings;
+}
+
 function parseClause(label: "Prerequisites" | "Corequisites", input: string): Prereq | null {
   if (!input) return null;
   const clause = extractParenthesized(label, input);
   if (!clause) return null;
+
   const required_courses = uniqueCourseCodes(clause);
   const non_course = extractNonCourse(clause);
-  if (required_courses.length === 0 && non_course.length === 0) {
-    // Empty (no recognizable content); still report raw_prose so caller knows
-    // there WAS a prereq clause we couldn't decompose.
-    return {
-      required_courses: [],
-      logic: null,
-      min_grade: null,
-      non_course: [],
-      raw_prose: clause,
-    };
-  }
+  const logic = inferLogic(clause);
+  const min_grade = inferMinGrade(clause);
+  const parse_warnings = computeWarnings(clause, required_courses, non_course, logic, min_grade);
+
   return {
     required_courses,
-    logic: inferLogic(clause),
-    min_grade: inferMinGrade(clause),
+    logic,
+    min_grade,
     non_course,
     raw_prose: clause,
+    parse_warnings,
   };
 }
 
@@ -205,5 +289,38 @@ export function parseCourseHtml(html: string, expectedCode: string): Course | nu
     coreqs,
     cross_listed,
     source_url: deriveSourceUrl(expectedCode),
+    prereq_summary: buildPrereqSummary(prereqs),
   };
+}
+
+const PREREQ_WARNING_SENTINEL =
+  "(prereqs published but not machine-parsed in full — see raw_prose)";
+
+/** Build a one-line human-readable prereq summary from the structured fields.
+ *
+ *  Rules (deterministic, no LLM):
+ *   1. null → null
+ *   2. any parse_warnings → sentinel string ("fall back to raw_prose")
+ *   3. else: join required_courses by AND/OR (logic defaults to "and"),
+ *      append "(min_grade or better)" if min_grade set,
+ *      append "; <non_course items>" joined by "; ".
+ */
+export function buildPrereqSummary(p: Prereq | null): string | null {
+  if (p === null) return null;
+  if (p.parse_warnings.length > 0) return PREREQ_WARNING_SENTINEL;
+
+  const parts: string[] = [];
+
+  if (p.required_courses.length > 0) {
+    const joiner = p.logic === "or" ? " or " : " and ";
+    let courses = p.required_courses.join(joiner);
+    if (p.min_grade) courses = `${courses} (${p.min_grade} or better)`;
+    parts.push(courses);
+  }
+
+  if (p.non_course.length > 0) {
+    parts.push(p.non_course.join("; "));
+  }
+
+  return parts.length > 0 ? parts.join("; ") : null;
 }
