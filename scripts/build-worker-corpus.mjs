@@ -479,6 +479,109 @@ async function scrapeTuitionViaSubprocess() {
   return parsed;
 }
 
+async function scrapeOnlineViaSubprocess() {
+  const { execFileSync } = await import("node:child_process");
+  console.error("[build-worker-corpus] scraping online.msstate.edu...");
+  let raw;
+  try {
+    raw = execFileSync(
+      "npx",
+      ["--yes", "tsx", "scripts/_scrape-online.ts"],
+      { cwd: process.cwd(), stdio: ["ignore", "pipe", "inherit"], maxBuffer: 32 * 1024 * 1024 },
+    );
+  } catch (err) {
+    throw new Error(
+      `online scrape subprocess failed (${err.message ?? err}) — refusing to ship a poisoned online corpus`,
+    );
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw.toString("utf8"));
+  } catch {
+    throw new Error(
+      "online scrape subprocess produced unparseable JSON — refusing to ship a poisoned online corpus",
+    );
+  }
+  if (!parsed || !Array.isArray(parsed.programs) || !parsed.admissions_process
+      || !Array.isArray(parsed.staff) || !Array.isArray(parsed.info_pages)) {
+    throw new Error(
+      "online scrape: malformed payload — refusing to ship a poisoned online corpus",
+    );
+  }
+  if (parsed.anyError) {
+    const failed = Object.entries(parsed.per_source ?? {})
+      .filter(([, info]) => !info.ok)
+      .map(([k, info]) => `${k}: ${info.error}`).join("; ");
+    throw new Error(
+      `online scrape: per-source failure (${failed}) — refusing to ship a poisoned online corpus`,
+    );
+  }
+  if (parsed.programs.length < 100) {
+    throw new Error(
+      `online scrape: only ${parsed.programs.length} programs (< 100) — refusing to ship a poisoned online corpus`,
+    );
+  }
+  const sectionCount = Object.values(parsed.admissions_process.sections ?? {}).filter((s) => typeof s === "string" && s.length > 0).length;
+  if (sectionCount < 5) {
+    throw new Error(
+      `online scrape: only ${sectionCount} admissions sections (< 5) — refusing to ship a poisoned online corpus`,
+    );
+  }
+  const ce = parsed.admissions_process.central_contact?.email ?? "";
+  if (!/@(online\.)?msstate\.edu$/.test(ce)) {
+    throw new Error(
+      `online scrape: central_contact.email='${ce}' not on msstate.edu — refusing to ship a poisoned online corpus`,
+    );
+  }
+  if (parsed.staff.length < 1) {
+    throw new Error(
+      "online scrape: 0 staff entries — refusing to ship a poisoned online corpus",
+    );
+  }
+  if (parsed.info_pages.length < 5) {
+    throw new Error(
+      `online scrape: only ${parsed.info_pages.length} info pages (< 5) — refusing to ship a poisoned online corpus`,
+    );
+  }
+  for (const ip of parsed.info_pages) {
+    if ((ip.body_markdown?.length ?? 0) < 200) {
+      throw new Error(
+        `online scrape: info page ${ip.slug} body too short (${ip.body_markdown?.length ?? 0} chars < 200) — refusing to ship a poisoned online corpus`,
+      );
+    }
+  }
+  // Category-specific parser-quality ceilings. We intentionally do NOT bound
+  // `no_deadlines_extracted` because many MSU online programs legitimately do
+  // not publish deadlines on their page — that warning reflects MSU content,
+  // not a parser bug. The other categories ARE parser-bug signals.
+  const counts = { no_contacts_extracted: 0, tuition_unparsed: 0, admissions_section_missing: 0 };
+  for (const p of parsed.programs) {
+    for (const w of p.parse_warnings ?? []) {
+      if (w in counts) counts[w]++;
+    }
+  }
+  if (counts.no_contacts_extracted > 5) {
+    throw new Error(
+      `online scrape: ${counts.no_contacts_extracted} programs missing contacts (> 5) — refusing to ship a poisoned online corpus`,
+    );
+  }
+  if (counts.tuition_unparsed > 5) {
+    throw new Error(
+      `online scrape: ${counts.tuition_unparsed} programs with tuition_unparsed (> 5) — refusing to ship a poisoned online corpus`,
+    );
+  }
+  if (counts.admissions_section_missing > 3) {
+    throw new Error(
+      `online scrape: ${counts.admissions_section_missing} programs with admissions_section_missing (> 3) — refusing to ship a poisoned online corpus`,
+    );
+  }
+  const totalWithWarnings = parsed.programs.filter((p) => (p.parse_warnings ?? []).length > 0).length;
+  console.error(
+    `[build-worker-corpus]   online: ${parsed.programs.length} programs, ${parsed.staff.length} staff, ${parsed.info_pages.length} info pages (${totalWithWarnings} programs have any warning; no_contacts=${counts.no_contacts_extracted}, tuition_unparsed=${counts.tuition_unparsed}, admissions_section_missing=${counts.admissions_section_missing})`,
+  );
+  return parsed;
+}
+
 async function main() {
   const skipCatalog = process.argv.includes("--skip-catalog");
   const skipCalendars = process.argv.includes("--skip-calendars");
@@ -746,6 +849,16 @@ process.stdout.write(JSON.stringify(breakdown));
     fee_rows: tuitionPayload.fee_rows,
     faq_rows: tuitionPayload.faq_rows,
     campuses: tuitionPayload.campuses,
+  };
+
+  const onlinePayload = await scrapeOnlineViaSubprocess();
+  out.online_education = {
+    builtAt,
+    source: "https://www.online.msstate.edu/",
+    programs: onlinePayload.programs,
+    admissions_process: onlinePayload.admissions_process,
+    staff: onlinePayload.staff,
+    info_pages: onlinePayload.info_pages,
   };
 
   // ---- v0.5.0: bake synonyms ---------------------------------------------

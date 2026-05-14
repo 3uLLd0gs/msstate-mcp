@@ -43,6 +43,12 @@ import { find_msu_tuition_faq } from "./tools/find_msu_tuition_faq.js";
 import { list_msu_tuition_campuses } from "./tools/list_msu_tuition_campuses.js";
 import { setTuitionCorpus } from "./tuition/corpus.js";
 import type { TuitionCorpus } from "./tuition/types.js";
+import { list_online_programs } from "./tools/list_online_programs.js";
+import { get_online_program } from "./tools/get_online_program.js";
+import { get_online_admissions_process } from "./tools/get_online_admissions_process.js";
+import { find_online_info } from "./tools/find_online_info.js";
+import { setOnlineCorpus } from "./online/corpus.js";
+import type { OnlineCorpus } from "./online/types.js";
 import { health_check } from "./tools/health_check.js";
 
 /**
@@ -68,6 +74,7 @@ Routing rules — pick the tool whose CATEGORY matches the question. If your fir
 3. Course questions ("what's the prereq for...", "what does X unlock?", "find a class about Y") → search_msu_courses, get_msu_course, get_msu_course_graph.
 4. Emergency / safety questions (tornado, fire, active shooter, refuge area, MSU PD) → get_msu_emergency_guideline, find_msu_severe_weather_refuge, get_msu_emergency_contacts. For life-threatening situations, ALWAYS lead with "Call 911 now."
 5. Tuition / fee / cost questions ("how much is tuition", "college fees", "DVM cost") → get_msu_tuition_rate (structured: campus + level + residency), get_msu_enrollment_fees, find_msu_tuition_faq, list_msu_tuition_campuses.
+6. Online-program / online-admissions / online-student-services questions ("does MSU have an online MBA?", "how do I apply to MSU online?", "who's the advisor for the online psychology program?", "what's the application deadline for the online MS in Cybersecurity?", "does MSU online operate in my state?", "military assistance for MSU online") → list_online_programs / get_online_program / get_online_admissions_process / find_online_info, picked by question shape. Distinction from policies/courses/tuition: the online module covers MSU's ONLINE program offerings via online.msstate.edu — distinct from the broader policy/course/tuition corpus. Online-specific tuition rates from controller.msstate.edu stay under get_msu_tuition_rate.
 
 Anti-hallucination rules — load-bearing:
 - Use ONLY data returned by the tools. Never substitute training-data knowledge of "what universities usually have" for actual tool results.
@@ -94,6 +101,10 @@ const TOOLS = [
   get_msu_enrollment_fees,
   find_msu_tuition_faq,
   list_msu_tuition_campuses,
+  list_online_programs,
+  get_online_program,
+  get_online_admissions_process,
+  find_online_info,
   health_check,
 ] as const;
 
@@ -112,6 +123,7 @@ declare const __GIT_SHA__: string | undefined;
 declare const __COURSE_CORPUS__: CourseCorpus | undefined;
 declare const __EMERGENCY_CORPUS__: EmergencyCorpus | undefined;
 declare const __TUITION_CORPUS__: TuitionCorpus | undefined;
+declare const __ONLINE_CORPUS__: OnlineCorpus | undefined;
 
 function safeVersion(): string {
   return typeof __VERSION__ !== "undefined" ? __VERSION__ : "";
@@ -156,6 +168,19 @@ function loadBakedTuitionCorpus(): void {
     });
   } else {
     log("warn", "no baked tuition corpus available; tuition tools will return empty results");
+  }
+}
+
+function loadBakedOnlineCorpus(): void {
+  if (typeof __ONLINE_CORPUS__ !== "undefined" && __ONLINE_CORPUS__) {
+    setOnlineCorpus(__ONLINE_CORPUS__);
+    log("info", "online corpus loaded", {
+      programs: __ONLINE_CORPUS__.programs.length,
+      staff: __ONLINE_CORPUS__.staff.length,
+      info_pages: __ONLINE_CORPUS__.info_pages.length,
+    });
+  } else {
+    log("warn", "no baked online corpus available; online tools will return empty results");
   }
 }
 
@@ -249,6 +274,7 @@ async function main(): Promise<void> {
   loadBakedCourseCorpus();
   loadBakedEmergencyCorpus();
   loadBakedTuitionCorpus();
+  loadBakedOnlineCorpus();
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

@@ -20,11 +20,13 @@ const workerCorpusPath = resolve(process.cwd(), "..", "worker", "corpus.json");
 let courseCorpus = null;
 let emergencyCorpus = null;
 let tuitionCorpus = null;
+let onlineCorpus = null;
 try {
   const j = JSON.parse(readFileSync(workerCorpusPath, "utf8"));
   courseCorpus = j.courses ?? null;
   emergencyCorpus = j.emergency ?? null;
   tuitionCorpus = j.tuition ?? null;
+  onlineCorpus = j.online_education ?? null;
 } catch {
   // fine — initial build before corpus.json exists.
 }
@@ -42,6 +44,7 @@ await build({
     __COURSE_CORPUS__: JSON.stringify(courseCorpus),
     __EMERGENCY_CORPUS__: JSON.stringify(emergencyCorpus),
     __TUITION_CORPUS__: JSON.stringify(tuitionCorpus),
+    __ONLINE_CORPUS__: JSON.stringify(onlineCorpus),
   },
   banner: {
     js: [

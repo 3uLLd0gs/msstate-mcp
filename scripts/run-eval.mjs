@@ -431,6 +431,120 @@ if (suite === "tuition") {
   process.exit(pass >= threshold ? 0 : 1);
 }
 
+if (suite === "online") {
+  const { spawn: spawnOnl } = await import("node:child_process");
+  const onlinePath = resolve(evalDir, "online.jsonl");
+  if (!existsSync(onlinePath)) {
+    console.error(`run-eval: ${onlinePath} not found`);
+    process.exit(1);
+  }
+  const rows = readFileSync(onlinePath, "utf8")
+    .split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("//")).map((l) => JSON.parse(l));
+
+  class OnlMcp {
+    constructor() {
+      this.proc = spawnOnl("node", [distPath], { stdio: ["pipe", "pipe", "inherit"] });
+      this.buf = ""; this.pending = new Map(); this.nextId = 1;
+      this.proc.stdout.on("data", (chunk) => {
+        this.buf += chunk.toString();
+        let nl;
+        while ((nl = this.buf.indexOf("\n")) >= 0) {
+          const line = this.buf.slice(0, nl);
+          this.buf = this.buf.slice(nl + 1);
+          if (!line.trim()) continue;
+          try {
+            const msg = JSON.parse(line);
+            if (msg.id && this.pending.has(msg.id)) {
+              const { r, j } = this.pending.get(msg.id);
+              this.pending.delete(msg.id);
+              if (msg.error) j(new Error(msg.error.message ?? "MCP error"));
+              else r(msg.result);
+            }
+          } catch { /* ignore */ }
+        }
+      });
+    }
+    call(method, params) {
+      const id = this.nextId++;
+      return new Promise((r, j) => {
+        this.pending.set(id, { r, j });
+        this.proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      });
+    }
+    async init() {
+      await this.call("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "run-eval-online", version: "0.1.0" } });
+    }
+    callTool(args) { return this.call("tools/call", args); }
+    close() { this.proc.kill(); }
+  }
+
+  const mcp = new OnlMcp();
+  await mcp.init();
+  let pass = 0;
+  const failures = [];
+  for (const q of rows) {
+    let res;
+    try {
+      res = await mcp.callTool(q.args);
+    } catch (err) {
+      failures.push({ q, got: `error: ${err.message}` });
+      continue;
+    }
+    const text = res?.content?.[0]?.text ?? "";
+    let parsed; try { parsed = JSON.parse(text); } catch { parsed = null; }
+    let ok = false;
+    const e = q.expect ?? {};
+    if (q.kind.startsWith("program_") || q.kind === "adversarial_program") {
+      const m = parsed?.matched;
+      if (e.matched_null) ok = m === null || m === undefined;
+      else if (e.matched_slug) ok = m?.slug === e.matched_slug;
+      else if (e.matched_degree_level) ok = m?.degree_level === e.matched_degree_level;
+      else if (e.matched_name_contains) ok = typeof m?.name === "string" && m.name.toLowerCase().includes(e.matched_name_contains.toLowerCase());
+      else if (e.matched_contacts_min !== undefined) ok = Array.isArray(m?.contacts) && m.contacts.length >= e.matched_contacts_min;
+      else if (e.matched_contacts_msstate_email) ok = Array.isArray(m?.contacts) && m.contacts.some((c) => c.email && /@(\w+\.)?msstate\.edu$/.test(c.email));
+      else if (e.deadlines_contain_term_date) ok = Array.isArray(m?.application_deadlines) && m.application_deadlines.some((d) => d.term === e.deadlines_contain_term_date[0] && new RegExp(e.deadlines_contain_term_date[1], "i").test(d.date_text));
+      else if (e.not_found_reason_nonempty) ok = typeof parsed?.not_found_reason === "string" && parsed.not_found_reason.length > 0;
+    } else if (q.kind.startsWith("list_") || q.kind === "adversarial_keyword") {
+      const matches = parsed?.matches ?? [];
+      const t = parsed?.total ?? 0; const ft = parsed?.filtered_total ?? 0;
+      if (e.filtered_total_min !== undefined) ok = ft >= e.filtered_total_min;
+      else if (e.total_min !== undefined) ok = t >= e.total_min;
+      else if (e.matches_min !== undefined) ok = matches.length >= e.matches_min;
+      else if (e.matches_max !== undefined) ok = matches.length <= e.matches_max;
+      else if (e.matches_eq !== undefined) ok = matches.length === e.matches_eq;
+    } else if (q.kind.startsWith("admissions_")) {
+      const sec = parsed?.sections ?? {};
+      if (e.section_undergraduate_contains_any) {
+        const body = (sec.undergraduate ?? "").toLowerCase();
+        ok = e.section_undergraduate_contains_any.some((s) => body.includes(s.toLowerCase()));
+      } else if (e.section_international_contains_any) {
+        const body = (sec.international ?? "").toLowerCase();
+        ok = e.section_international_contains_any.some((s) => body.includes(s.toLowerCase()));
+      } else if (e.all_5_sections_present) {
+        ok = ["undergraduate","graduate","transfer","readmit","international"].every((st) => typeof sec[st] === "string" && sec[st].length > 0);
+      } else if (e.central_email_eq) {
+        ok = parsed?.central_contact?.email === e.central_email_eq;
+      } else if (e.external_apply_contains_substrs) {
+        const urls = (parsed?.external_apply_urls ?? []).map((u) => u.url ?? "");
+        ok = e.external_apply_contains_substrs.every((s) => urls.some((u) => u.includes(s)));
+      }
+    } else if (q.kind.startsWith("info_") || q.kind === "adversarial_off_topic") {
+      const matches = parsed?.matches ?? [];
+      if (e.top_slug) ok = matches[0]?.slug === e.top_slug;
+      else if (e.any_slug) ok = matches.some((m) => m.slug === e.any_slug);
+      else if (e.any_full_body_contains) ok = matches.some((m) => (m.full_body ?? "").includes(e.any_full_body_contains));
+      else if (e.matches_eq !== undefined) ok = matches.length === e.matches_eq;
+    }
+    if (ok) pass++;
+    else failures.push({ q, got: parsed ?? text.slice(0, 200) });
+  }
+  mcp.close();
+  console.log(`online eval: ${pass}/${rows.length} passed`);
+  for (const f of failures.slice(0, 20)) console.error("FAIL", JSON.stringify(f.q.desc ?? f.q.kind), "got", JSON.stringify(f.got).slice(0, 300));
+  const threshold = Math.ceil(rows.length * 0.9);
+  process.exit(pass >= threshold ? 0 : 1);
+}
+
 const allQuestions = readFileSync(questionsPath, "utf8")
   .split("\n")
   .map((l) => l.trim())

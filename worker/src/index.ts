@@ -882,6 +882,201 @@ function tuiRouteRate(req: TuiRateReq): { matches: TuitionRateRow[]; not_found_r
   return { matches: rows };
 }
 
+// ---- online block ----------------------------------------------------------
+
+type DegreeLevel = "bachelor" | "master" | "specialist" | "doctoral" | "certificate" | "endorsement";
+type StudentType = "undergraduate" | "graduate" | "transfer" | "readmit" | "international";
+
+interface OnlineContact {
+  name: string;
+  title: string;
+  email: string | null;
+  phone: string | null;
+}
+interface OnlineApplicationDeadline { term: string; date_text: string; }
+interface OnlineEntranceExams { required: string[]; not_required: string[]; notes: string; }
+interface OnlineProgramTuition {
+  per_credit_usd: number | null;
+  instructional_fee_per_credit_usd: number | null;
+  application_fee_domestic_usd: number | null;
+  application_fee_international_usd: number | null;
+  raw_prose: string;
+}
+interface OnlineProgram {
+  slug: string; name: string; degree_level: DegreeLevel; format: string;
+  short_description: string; url: string;
+  tuition: OnlineProgramTuition;
+  contacts: OnlineContact[];
+  application_deadlines: OnlineApplicationDeadline[];
+  admission_requirements: string;
+  entrance_exams: OnlineEntranceExams | null;
+  accreditation: string | null;
+  forms: { label: string; url: string }[];
+  raw_sections: Record<string, string>;
+  parse_warnings?: string[];
+  retrieved_at: string;
+}
+interface OnlineAdmissionsProcess {
+  url: string;
+  central_contact: OnlineContact;
+  shared_prelude: string;
+  sections: Record<StudentType, string>;
+  application_fee_tiers: { kind: string; usd: number }[];
+  external_apply_urls: { kind: string; url: string }[];
+  retrieved_at: string;
+}
+interface OnlineStaffEntry {
+  name: string; title: string; email: string | null; phone: string | null;
+  office: string; url: string; retrieved_at: string;
+}
+interface OnlineInfoPage {
+  slug: string; title: string; url: string; body_markdown: string; retrieved_at: string;
+}
+interface OnlineCorpus {
+  builtAt: string;
+  source: string;
+  programs: OnlineProgram[];
+  admissions_process: OnlineAdmissionsProcess;
+  staff: OnlineStaffEntry[];
+  info_pages: OnlineInfoPage[];
+}
+
+const ONLINE: OnlineCorpus | null =
+  (corpus as { online_education?: OnlineCorpus }).online_education ?? null;
+
+const ONLINE_DISCLAIMER =
+  "Contact info, application deadlines, tuition, and program details on online.msstate.edu can change between releases. Verify against the source URL before applying.";
+
+const ONL_FIELD_WEIGHTS = { title: 3, body: 1 } as const;
+const ONL_BM25_K1 = 1.2;
+const ONL_BM25_B = 0.75;
+
+interface OnlInfoDoc {
+  row: OnlineInfoPage;
+  titleTokens: string[];
+  bodyTokens: string[];
+  dl: number;
+}
+
+function flattenStaffAsDocWorker(staff: OnlineStaffEntry[]): OnlineInfoPage {
+  const lines = staff.map((s) => `${s.name} — ${s.title}. ${s.email ?? ""} ${s.phone ?? ""} ${s.office}`);
+  return {
+    slug: "staff",
+    title: "MSU Online Staff",
+    url: "https://www.online.msstate.edu/staff",
+    body_markdown: lines.join("\n"),
+    retrieved_at: staff[0]?.retrieved_at ?? "1970-01-01T00:00:00.000Z",
+  };
+}
+
+const ONL_INFO_DOCS: OnlInfoDoc[] = (() => {
+  if (!ONLINE) return [];
+  const docs: OnlineInfoPage[] = [...ONLINE.info_pages];
+  if (ONLINE.staff.length > 0) docs.push(flattenStaffAsDocWorker(ONLINE.staff));
+  return docs.map((row) => ({
+    row,
+    titleTokens: tokenize(row.title),
+    bodyTokens: tokenize(row.body_markdown),
+    dl: tokenize(row.title).length + tokenize(row.body_markdown).length,
+  }));
+})();
+
+const ONL_INFO_DF = new Map<string, number>();
+let ONL_INFO_AVGLEN = 0;
+{
+  let total = 0;
+  for (const d of ONL_INFO_DOCS) {
+    total += d.dl;
+    const seen = new Set<string>();
+    for (const t of [...d.titleTokens, ...d.bodyTokens]) {
+      if (seen.has(t)) continue;
+      seen.add(t);
+      ONL_INFO_DF.set(t, (ONL_INFO_DF.get(t) ?? 0) + 1);
+    }
+  }
+  ONL_INFO_AVGLEN = ONL_INFO_DOCS.length > 0 ? total / ONL_INFO_DOCS.length : 0;
+}
+
+function onlInfoIdf(t: string): number {
+  const n = ONL_INFO_DOCS.length;
+  const dfi = ONL_INFO_DF.get(t) ?? 0;
+  if (dfi === 0 || n === 0) return 0;
+  return Math.log(1 + (n - dfi + 0.5) / (dfi + 0.5));
+}
+
+function onlInfoBm25(tf: number, dl: number, idfV: number): number {
+  if (tf <= 0) return 0;
+  const denom = tf + ONL_BM25_K1 * (1 - ONL_BM25_B + (ONL_BM25_B * dl) / (ONL_INFO_AVGLEN || 1));
+  return idfV * ((tf * (ONL_BM25_K1 + 1)) / denom);
+}
+
+type OnlineScope =
+  | "all" | "state-authorization" | "military-assistance" | "orientation" | "faq" | "financial-matters" | "staff";
+
+function onlSearchInfo(query: string, k: number, scope: OnlineScope): { row: OnlineInfoPage; score: number }[] {
+  const qTokens = tokenize(query);
+  if (qTokens.length === 0) return [];
+  const docs = scope === "all" ? ONL_INFO_DOCS : ONL_INFO_DOCS.filter((d) => d.row.slug === scope);
+  const out: { row: OnlineInfoPage; score: number }[] = [];
+  for (const d of docs) {
+    let s = 0;
+    for (const q of qTokens) {
+      const idfQ = onlInfoIdf(q);
+      if (idfQ === 0) continue;
+      s += ONL_FIELD_WEIGHTS.title * onlInfoBm25(countOf(q, d.titleTokens), d.dl, idfQ);
+      s += ONL_FIELD_WEIGHTS.body  * onlInfoBm25(countOf(q, d.bodyTokens),  d.dl, idfQ);
+    }
+    if (s > 0) out.push({ row: d.row, score: s });
+  }
+  out.sort((a, b) => b.score - a.score);
+  return out.slice(0, Math.max(1, Math.min(k, out.length)));
+}
+
+function onlFilterPrograms(req: { level?: DegreeLevel; subject_keyword?: string; limit?: number; offset?: number }) {
+  const programs = ONLINE?.programs ?? [];
+  let filtered = programs;
+  if (req.level) filtered = filtered.filter((p) => p.degree_level === req.level);
+  if (req.subject_keyword && req.subject_keyword.trim().length > 0) {
+    const k = req.subject_keyword.trim().toLowerCase();
+    filtered = filtered.filter((p) =>
+      p.name.toLowerCase().includes(k) || p.short_description.toLowerCase().includes(k));
+  }
+  const limit = Math.max(1, Math.min(req.limit ?? 50, 200));
+  const offset = Math.max(0, req.offset ?? 0);
+  return {
+    matches: filtered.slice(offset, offset + limit).map((p) => ({
+      slug: p.slug, name: p.name, degree_level: p.degree_level,
+      short_description: p.short_description, url: p.url,
+    })),
+    total: programs.length,
+    filtered_total: filtered.length,
+  };
+}
+
+function onlFuzzyResolveProgram(query: string): { matched: OnlineProgram | null; did_you_mean: Array<{ slug: string; name: string }> } {
+  const programs = ONLINE?.programs ?? [];
+  const qTokens = tokenize(query);
+  if (qTokens.length === 0) return { matched: null, did_you_mean: [] };
+  const scored = programs.map((p) => {
+    const slugT = tokenize(p.slug);
+    const nameT = tokenize(p.name);
+    const shortT = tokenize(p.short_description);
+    let score = 0;
+    for (const q of qTokens) {
+      score += 4 * countOf(q, slugT);
+      score += 3 * countOf(q, nameT);
+      score += 1 * countOf(q, shortT);
+    }
+    return { p, score };
+  }).filter((x) => x.score > 0);
+  scored.sort((a, b) => b.score - a.score);
+  if (scored.length === 0) return { matched: null, did_you_mean: [] };
+  return {
+    matched: scored[0].p,
+    did_you_mean: scored.slice(1, 3).map((x) => ({ slug: x.p.slug, name: x.p.name })),
+  };
+}
+
 // ---- Helpers ----------------------------------------------------------------
 
 function findPolicy(numberOrSlug?: string, url?: string): Policy | undefined {
@@ -1153,6 +1348,53 @@ const TOOLS = [
     name: "list_msu_tuition_campuses",
     description: "List MSU's 5 published tuition campuses (starkville, meridian, mgccc, online, vetmed) with display name, levels_offered, rate_basis, and source URL. Use this to discover valid `campus` values before calling get_msu_tuition_rate.",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "list_online_programs",
+    description: "Browse / filter MSU's online programs from online.msstate.edu. Returns lightweight rows {slug, name, degree_level, short_description, url}; for full details follow up with get_online_program. `level` filters by degree level. `subject_keyword` is case-insensitive substring on name + short_description. `limit` (default 50, max 200) + `offset` paginate. Every response carries the online disclaimer.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        level: { type: "string", enum: ["bachelor","master","specialist","doctoral","certificate","endorsement"] },
+        subject_keyword: { type: "string", description: "Substring match, max 4096 chars" },
+        limit: { type: "integer", minimum: 1, maximum: 200 },
+        offset: { type: "integer", minimum: 0 },
+      },
+    },
+  },
+  {
+    name: "get_online_program",
+    description: "Fetch one online program's full record. Provide `slug` (e.g. 'mba', 'bsee') for direct lookup, OR `name_query` (e.g. 'online psychology bachelor') for fuzzy match. Exactly one required. When name_query routes via BM25, top-1 is in matched and next-2 in did_you_mean. Every response carries the online disclaimer.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string", description: "URL-tail slug, max 4096 chars" },
+        name_query: { type: "string", description: "Fuzzy name query, max 4096 chars" },
+      },
+    },
+  },
+  {
+    name: "get_online_admissions_process",
+    description: "Return MSU Online's admissions process sectioned by student type (undergraduate / graduate / transfer / readmit / international). Pass `student_type` for one section; omit for all five. Always returns shared_prelude + central_contact + application_fee_tiers + external_apply_urls. Carries the online disclaimer.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        student_type: { type: "string", enum: ["undergraduate","graduate","transfer","readmit","international"] },
+      },
+    },
+  },
+  {
+    name: "find_online_info",
+    description: "BM25 search over MSU Online's support pages (state-authorization, military-assistance, orientation, faq, financial-matters) + the central staff directory. Use when the question isn't about a specific program or the general admissions process. `scope` pre-filters to one slug. Top-k matches with verbatim excerpt + full_body + source_url. Carries the online disclaimer.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        q: { type: "string", description: "Free-text query, max 4096 chars" },
+        k: { type: "integer", minimum: 1, maximum: 10 },
+        scope: { type: "string", enum: ["all","state-authorization","military-assistance","orientation","faq","financial-matters","staff"] },
+      },
+      required: ["q"],
+    },
   },
   {
     name: "health_check",
@@ -1580,10 +1822,120 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Mc
       });
     }
 
+    case "list_online_programs": {
+      const a = args as Record<string, unknown>;
+      const VALID_LEVELS = ["bachelor","master","specialist","doctoral","certificate","endorsement"];
+      const level = a.level !== undefined ? String(a.level) : undefined;
+      if (level !== undefined && !VALID_LEVELS.includes(level)) {
+        return errorContent("level must be one of: " + VALID_LEVELS.join(", "));
+      }
+      const subject_keyword = typeof a.subject_keyword === "string" ? a.subject_keyword : undefined;
+      if (subject_keyword !== undefined && subject_keyword.length > MAX_QUERY_CHARS) return tooLong("subject_keyword", subject_keyword);
+      const limit = typeof a.limit === "number" ? a.limit : undefined;
+      if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 200)) return errorContent("limit must be an integer 1-200.");
+      const offset = typeof a.offset === "number" ? a.offset : undefined;
+      if (offset !== undefined && (!Number.isInteger(offset) || offset < 0)) return errorContent("offset must be a non-negative integer.");
+      const r = onlFilterPrograms({ level: level as DegreeLevel | undefined, subject_keyword, limit, offset });
+      return jsonContent({
+        disclaimer: ONLINE_DISCLAIMER,
+        matches: r.matches,
+        total: r.total,
+        filtered_total: r.filtered_total,
+        corpus_built_at: ONLINE?.builtAt ?? null,
+      });
+    }
+    case "get_online_program": {
+      const a = args as Record<string, unknown>;
+      const slug = typeof a.slug === "string" ? a.slug : undefined;
+      const name_query = typeof a.name_query === "string" ? a.name_query : undefined;
+      if ((slug && name_query) || (!slug && !name_query)) {
+        return errorContent("Exactly one of slug or name_query is required.");
+      }
+      if (slug && slug.length > MAX_QUERY_CHARS) return tooLong("slug", slug);
+      if (name_query && name_query.length > MAX_QUERY_CHARS) return tooLong("name_query", name_query);
+      let matched: OnlineProgram | null = null;
+      let did_you_mean: Array<{ slug: string; name: string }> = [];
+      let not_found_reason: string | null = null;
+      if (slug) {
+        matched = (ONLINE?.programs ?? []).find((p) => p.slug === slug) ?? null;
+        if (!matched) not_found_reason = `No program with slug '${slug}'. Try list_online_programs to see valid slugs.`;
+      } else if (name_query) {
+        const r = onlFuzzyResolveProgram(name_query);
+        matched = r.matched;
+        did_you_mean = r.did_you_mean;
+        if (!matched) not_found_reason = `No program matched '${name_query}'. Try list_online_programs(subject_keyword=…).`;
+      }
+      return jsonContent({
+        disclaimer: ONLINE_DISCLAIMER,
+        matched,
+        did_you_mean,
+        not_found_reason,
+        corpus_built_at: ONLINE?.builtAt ?? null,
+      });
+    }
+    case "get_online_admissions_process": {
+      const a = args as Record<string, unknown>;
+      const VALID_TYPES = ["undergraduate","graduate","transfer","readmit","international"];
+      const student_type = a.student_type !== undefined ? String(a.student_type) : undefined;
+      if (student_type !== undefined && !VALID_TYPES.includes(student_type)) {
+        return errorContent("student_type must be one of: " + VALID_TYPES.join(", "));
+      }
+      const ap = ONLINE?.admissions_process;
+      if (!ap) {
+        return jsonContent({
+          disclaimer: ONLINE_DISCLAIMER,
+          shared_prelude: "",
+          sections: {},
+          central_contact: { name: "", title: "", email: null, phone: null },
+          application_fee_tiers: [],
+          external_apply_urls: [],
+          source_url: "https://www.online.msstate.edu/admissions-process",
+          not_found_reason: "Online admissions process is not loaded in the corpus.",
+          corpus_built_at: ONLINE?.builtAt ?? null,
+        });
+      }
+      const sections = student_type ? { [student_type]: ap.sections[student_type as StudentType] } : ap.sections;
+      return jsonContent({
+        disclaimer: ONLINE_DISCLAIMER,
+        shared_prelude: ap.shared_prelude,
+        sections,
+        central_contact: ap.central_contact,
+        application_fee_tiers: ap.application_fee_tiers,
+        external_apply_urls: ap.external_apply_urls,
+        source_url: ap.url,
+        corpus_built_at: ONLINE?.builtAt ?? null,
+      });
+    }
+    case "find_online_info": {
+      const a = args as Record<string, unknown>;
+      const q = String(a.q ?? "");
+      if (q.length === 0) return errorContent("q is required.");
+      if (q.length > MAX_QUERY_CHARS) return tooLong("q", q);
+      const k = typeof a.k === "number" ? a.k : 3;
+      if (!Number.isInteger(k) || k < 1 || k > 10) return errorContent("k must be an integer 1-10.");
+      const VALID_SCOPES = ["all","state-authorization","military-assistance","orientation","faq","financial-matters","staff"];
+      const scope = a.scope !== undefined ? String(a.scope) : "all";
+      if (!VALID_SCOPES.includes(scope)) return errorContent("scope must be one of: " + VALID_SCOPES.join(", "));
+      const hits = onlSearchInfo(q, k, scope as OnlineScope);
+      const matches = hits.map((h) => ({
+        slug: h.row.slug,
+        title: h.row.title,
+        excerpt: h.row.body_markdown.length <= 300 ? h.row.body_markdown : h.row.body_markdown.slice(0, 300) + "…",
+        full_body: h.row.body_markdown,
+        source_url: h.row.url,
+        bm25_score: h.score,
+      }));
+      return jsonContent({
+        disclaimer: ONLINE_DISCLAIMER,
+        matches,
+        corpus_built_at: ONLINE?.builtAt ?? null,
+      });
+    }
+
     case "health_check": {
       return jsonContent({
         runtime: "cloudflare-workers",
-        version: "0.9.0",
+        version: "1.0.0",
         index_row_count: corpus.indexRowCount,
         policies_in_corpus: POLICIES.length,
         corpus_built_at: corpus.builtAt,
@@ -1602,6 +1954,9 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Mc
         tuition_fee_count: TUITION?.fee_rows.length ?? 0,
         tuition_faq_count: TUITION?.faq_rows.length ?? 0,
         tuition_campus_count: TUITION?.campuses.length ?? 0,
+        online_program_count: ONLINE?.programs.length ?? 0,
+        online_info_page_count: ONLINE?.info_pages.length ?? 0,
+        online_staff_count: ONLINE?.staff.length ?? 0,
         courses_parse_quality: coursesParseQualityWorker(),
         note: "This is the Cloudflare Workers variant. Corpus is a pre-extracted snapshot; rebuild via scripts/build-worker-corpus.mjs to refresh.",
       });
@@ -1645,6 +2000,7 @@ Routing rules — pick the tool whose CATEGORY matches the question. If your fir
 3. Course questions ("what's the prereq for...", "what does X unlock?", "find a class about Y") → search_msu_courses, get_msu_course, get_msu_course_graph.
 4. Emergency / safety questions (tornado, fire, active shooter, refuge area, MSU PD) → get_msu_emergency_guideline, find_msu_severe_weather_refuge, get_msu_emergency_contacts. For life-threatening situations, ALWAYS lead with "Call 911 now."
 5. Tuition / fee / cost questions ("how much is tuition", "college fees", "DVM cost") → get_msu_tuition_rate (structured: campus + level + residency), get_msu_enrollment_fees, find_msu_tuition_faq, list_msu_tuition_campuses.
+6. Online-program / online-admissions / online-student-services questions ("does MSU have an online MBA?", "how do I apply to MSU online?", "who's the advisor for the online psychology program?", "what's the application deadline for the online MS in Cybersecurity?", "does MSU online operate in my state?", "military assistance for MSU online") → list_online_programs / get_online_program / get_online_admissions_process / find_online_info, picked by question shape. Distinction from policies/courses/tuition: the online module covers MSU's ONLINE program offerings via online.msstate.edu — distinct from the broader policy/course/tuition corpus. Online-specific tuition rates from controller.msstate.edu stay under get_msu_tuition_rate.
 
 Anti-hallucination rules — load-bearing:
 - Use ONLY data returned by the tools. Never substitute training-data knowledge of "what universities usually have" for actual tool results.
@@ -1704,7 +2060,7 @@ async function handleRpc(req: JsonRpcRequest): Promise<JsonRpcResponse | null> {
         id,
         result: {
           protocolVersion: PROTOCOL_VERSION,
-          serverInfo: { name: "msstate-policies", version: "0.9.0" },
+          serverInfo: { name: "msstate-policies", version: "1.0.0" },
           capabilities: { tools: { listChanged: false } },
           instructions: SERVER_INSTRUCTIONS,
         },
@@ -1775,7 +2131,7 @@ export default {
           JSON.stringify(
             {
               name: "msstate-policies-mcp",
-              version: "0.9.0",
+              version: "1.0.0",
               runtime: "cloudflare-workers",
               policies: POLICIES.length,
               builtAt: corpus.builtAt,
