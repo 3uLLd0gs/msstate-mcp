@@ -545,6 +545,102 @@ if (suite === "online") {
   process.exit(pass >= threshold ? 0 : 1);
 }
 
+if (suite === "dining") {
+  const { spawn: spawnDin } = await import("node:child_process");
+  const diningPath = resolve(evalDir, "dining.jsonl");
+  if (!existsSync(diningPath)) {
+    console.error(`run-eval: ${diningPath} not found`);
+    process.exit(1);
+  }
+  const rows = readFileSync(diningPath, "utf8")
+    .split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("//")).map((l) => JSON.parse(l));
+
+  class DinMcp {
+    constructor() {
+      this.proc = spawnDin("node", [distPath], { stdio: ["pipe", "pipe", "inherit"] });
+      this.buf = ""; this.pending = new Map(); this.nextId = 1;
+      this.proc.stdout.on("data", (chunk) => {
+        this.buf += chunk.toString();
+        let nl;
+        while ((nl = this.buf.indexOf("\n")) >= 0) {
+          const line = this.buf.slice(0, nl);
+          this.buf = this.buf.slice(nl + 1);
+          if (!line.trim() || !line.trim().startsWith("{")) continue;
+          try {
+            const msg = JSON.parse(line);
+            if (msg.id && this.pending.has(msg.id)) {
+              const { r, j } = this.pending.get(msg.id);
+              this.pending.delete(msg.id);
+              if (msg.error) j(new Error(msg.error.message ?? "MCP error"));
+              else r(msg.result);
+            }
+          } catch { /* ignore */ }
+        }
+      });
+    }
+    call(method, params) {
+      const id = this.nextId++;
+      return new Promise((r, j) => {
+        this.pending.set(id, { r, j });
+        this.proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      });
+    }
+    async init() {
+      await this.call("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "run-eval-dining", version: "0.1.0" } });
+    }
+    callTool(args) { return this.call("tools/call", args); }
+    close() { this.proc.kill(); }
+  }
+
+  const mcp = new DinMcp();
+  await mcp.init();
+  let pass = 0;
+  const failures = [];
+  for (const q of rows) {
+    let res;
+    try {
+      res = await mcp.callTool(q.args);
+    } catch (err) {
+      if (q.expect?.throws) { pass++; continue; }
+      failures.push({ q, got: `error: ${err.message}` });
+      continue;
+    }
+    if (q.expect?.throws) { failures.push({ q, got: "expected throw, got success" }); continue; }
+    const text = res?.content?.[0]?.text ?? "";
+    let parsed; try { parsed = JSON.parse(text); } catch { parsed = null; }
+    let ok = false;
+    const e = q.expect ?? {};
+    if (q.kind === "location_slug_lookup" || q.kind === "location_name_query") {
+      const m = parsed?.matched;
+      if (e.matched_slug) ok = m?.slug === e.matched_slug;
+      else if (e.matched_slug_prefix) ok = typeof m?.slug === "string" && m.slug.startsWith(e.matched_slug_prefix);
+    } else if (q.kind === "list_filter") {
+      const t = parsed?.total ?? 0;
+      const matches = parsed?.matches ?? [];
+      if (e.total_min !== undefined) ok = t >= e.total_min;
+      else if (e.matches_min !== undefined) ok = matches.length >= e.matches_min;
+      else if (e.matches_max !== undefined) ok = matches.length <= e.matches_max;
+    } else if (q.kind === "open_status_check") {
+      const s = parsed?.status_now;
+      const sKey = typeof s === "object" && s ? s.status : s;
+      ok = Array.isArray(e.status_one_of) && e.status_one_of.includes(sKey);
+    } else if (q.kind === "adversarial") {
+      if (e.matched_null && e.not_found_reason_nonempty) {
+        ok = parsed?.matched === null && typeof parsed?.not_found_reason === "string" && parsed.not_found_reason.length > 0;
+      } else if (e.matches_eq !== undefined) {
+        ok = (parsed?.matches?.length ?? -1) === e.matches_eq;
+      }
+    }
+    if (ok) pass++;
+    else failures.push({ q, got: parsed ?? text.slice(0, 200) });
+  }
+  mcp.close();
+  console.log(`dining eval: ${pass}/${rows.length} passed`);
+  for (const f of failures.slice(0, 20)) console.error("FAIL", JSON.stringify(f.q.desc ?? f.q.kind), "got", JSON.stringify(f.got).slice(0, 300));
+  const threshold = Math.ceil(rows.length * 0.9);
+  process.exit(pass >= threshold ? 0 : 1);
+}
+
 const allQuestions = readFileSync(questionsPath, "utf8")
   .split("\n")
   .map((l) => l.trim())

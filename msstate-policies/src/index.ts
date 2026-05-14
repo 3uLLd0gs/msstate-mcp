@@ -49,6 +49,10 @@ import { get_online_admissions_process } from "./tools/get_online_admissions_pro
 import { find_online_info } from "./tools/find_online_info.js";
 import { setOnlineCorpus } from "./online/corpus.js";
 import type { OnlineCorpus } from "./online/types.js";
+import { list_msu_dining_locations } from "./tools/list_msu_dining_locations.js";
+import { get_msu_dining_hours } from "./tools/get_msu_dining_hours.js";
+import { setDiningCorpus } from "./dining/corpus.js";
+import type { DiningCorpus } from "./dining/types.js";
 import { health_check } from "./tools/health_check.js";
 
 /**
@@ -75,6 +79,7 @@ Routing rules — pick the tool whose CATEGORY matches the question. If your fir
 4. Emergency / safety questions (tornado, fire, active shooter, refuge area, MSU PD) → get_msu_emergency_guideline, find_msu_severe_weather_refuge, get_msu_emergency_contacts. For life-threatening situations, ALWAYS lead with "Call 911 now."
 5. Tuition / fee / cost questions ("how much is tuition", "college fees", "DVM cost") → get_msu_tuition_rate (structured: campus + level + residency), get_msu_enrollment_fees, find_msu_tuition_faq, list_msu_tuition_campuses.
 6. Online-program / online-admissions / online-student-services questions ("does MSU have an online MBA?", "how do I apply to MSU online?", "who's the advisor for the online psychology program?", "what's the application deadline for the online MS in Cybersecurity?", "does MSU online operate in my state?", "military assistance for MSU online") → list_online_programs / get_online_program / get_online_admissions_process / find_online_info, picked by question shape. Distinction from policies/courses/tuition: the online module covers MSU's ONLINE program offerings via online.msstate.edu — distinct from the broader policy/course/tuition corpus. Online-specific tuition rates from controller.msstate.edu stay under get_msu_tuition_rate.
+7. Dining / food / meal-hour questions ("is Perry open?", "what time does Chick-fil-A close?", "where can I get coffee right now?", "list dining halls", "what's open at 9 pm") -> get_msu_dining_hours for a specific venue (slug or fuzzy name), list_msu_dining_locations for browse/filter. Always surface corpus_built_at and the disclaimer - dining hours change frequently and the local-install snapshot may be days-months old. Distinct from meal-plan-cost questions which are not yet covered.
 
 Anti-hallucination rules — load-bearing:
 - Use ONLY data returned by the tools. Never substitute training-data knowledge of "what universities usually have" for actual tool results.
@@ -105,6 +110,8 @@ const TOOLS = [
   get_online_program,
   get_online_admissions_process,
   find_online_info,
+  list_msu_dining_locations,
+  get_msu_dining_hours,
   health_check,
 ] as const;
 
@@ -124,6 +131,7 @@ declare const __COURSE_CORPUS__: CourseCorpus | undefined;
 declare const __EMERGENCY_CORPUS__: EmergencyCorpus | undefined;
 declare const __TUITION_CORPUS__: TuitionCorpus | undefined;
 declare const __ONLINE_CORPUS__: OnlineCorpus | undefined;
+declare const __DINING_CORPUS__: DiningCorpus | undefined;
 
 function safeVersion(): string {
   return typeof __VERSION__ !== "undefined" ? __VERSION__ : "";
@@ -181,6 +189,17 @@ function loadBakedOnlineCorpus(): void {
     });
   } else {
     log("warn", "no baked online corpus available; online tools will return empty results");
+  }
+}
+
+function loadBakedDiningCorpus(): void {
+  if (typeof __DINING_CORPUS__ !== "undefined" && __DINING_CORPUS__) {
+    setDiningCorpus(__DINING_CORPUS__);
+    log("info", "dining corpus loaded", {
+      locations: __DINING_CORPUS__.locations.length,
+    });
+  } else {
+    log("warn", "no baked dining corpus available; dining tools will return empty results");
   }
 }
 
@@ -275,6 +294,7 @@ async function main(): Promise<void> {
   loadBakedEmergencyCorpus();
   loadBakedTuitionCorpus();
   loadBakedOnlineCorpus();
+  loadBakedDiningCorpus();
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

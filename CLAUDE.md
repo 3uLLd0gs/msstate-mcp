@@ -37,6 +37,7 @@ This is non-negotiable and applies to every Claude session that touches this rep
 - Do fetch `https://www.policies.msstate.edu/current`, parse it, and follow the `<a class="btn-download">` links to extract policy text from MSU's own PDFs.
 - Do use `WebFetch` and `curl` for `policies.msstate.edu` and its `*.msstate.edu` subdomains only when needed to verify selectors, audit PDFs, or seed fixtures.
 - Do label any string in the codebase that didn't come from the live site as "placeholder" or "example only" so a future maintainer doesn't mistake it for ground truth.
+- **MSU-authoritative includes any domain that an `*.msstate.edu` URL 200-redirects to.** The only domain admitted under this expansion today is `msstatedining.mydininghub.com` (Compass Group Touchpoint platform), pinned in the frozen `DINING_ROOTS` allowlist in `msstate-policies/src/dining/types.ts`. Adding a future redirect target requires a new spec entry and a new addendum in this file.
 
 The whole grounding story of this MCP collapses if its inputs are contaminated by anything other than what MSU publishes. A wrong answer to "what's the policy on amnesty?" is the worst-case failure mode (the design targets 99.99% answer correctness as the north star). The simplest defense is the corpus rule above.
 
@@ -186,3 +187,56 @@ The parser tries Pattern A first, then falls back to Pattern B / C extractors be
 **Server-side routing:** `InitializeResult.instructions` gains a 6th rule routing online-program / admissions / student-services questions to the 4 new tools. Distinct from policies/courses/tuition (which cover the broader MSU corpus).
 
 **Security checks ONL1-ONL5 (+12 pts; 245 -> 257 macOS, 269 Linux CI):** allowlist URLs stay on msstate.edu; `Object.freeze` on `ONLINE_ROOTS` + `SUPPORT_PAGE_SLUGS`; Worker length-caps `q`/`subject_keyword`/`name_query` before parse; build aborts on poisoned corpus; `ONLINE_DISCLAIMER` referenced in types.ts + all 4 tool files.
+
+### Corpus extension (2026-05-14) - dining (v1.1.0)
+
+Adds 2 MCP tools (`list_msu_dining_locations`, `get_msu_dining_hours`) over a
+hybrid-source corpus of MSU's published dining venues (~24 locations). Tool
+count 22 -> 24.
+
+**First module to exercise the expanded corpus rule.** MSU-authoritative includes
+domains that an *.msstate.edu URL 200-redirects to. The only domain admitted
+under this expansion today is `msstatedining.mydininghub.com` (Compass Group
+Touchpoint platform), pinned in the frozen `DINING_ROOTS` allowlist in
+`msstate-policies/src/dining/types.ts`. Adding a future redirect target
+requires a new spec entry.
+
+**Two-tier freshness model:**
+- Worker refreshed daily via `.github/workflows/dining-refresh.yml` (09:00 UTC
+  cron). No npm version bump.
+- npm bundle refreshed quarterly via `.github/workflows/corpus-release.yml`
+  (1st of Feb/May/Aug/Nov). Auto-bumps patch version.
+
+`DINING_DISCLAIMER` on every response; stdio/plugin users explicitly told to
+verify against the source URL.
+
+**Extraction hybrid:** location list via static HTML scrape of /en/sitemap
+(cheerio); per-location hours via Playwright (build-time devDep) clicking the
+"This Week's Hours" modal trigger. Playwright chromium installed in CI only -
+never shipped to runtime.
+
+**Polite-scraping policy (DIN6):** realistic Chrome UA pool (3 versions),
+sequential (concurrency=1), jitter 1500-4500ms between fetches, random scroll
+2-4 increments before reading DOM, X-Source header on plain HTTP only (not on
+Playwright browser context - Touchpoint's WAF redirected location pages to
+/en/locations when it was present). Robots.txt honored. If Touchpoint requests
+we stop, we comply and deprecate the module within one release cycle.
+
+**Build aborts (>=6 canonical "refusing to ship a poisoned dining corpus"
+sites; 10 implemented):** subprocess failure, unparseable JSON, malformed
+payload, per-source error, locations.length < 15, no_hours_extracted > 5,
+off-allowlist URL (per-location loop), malformed URL, --skip-dining missing
+on-disk block, --skip-dining read failure.
+
+**Per-location `parse_warnings: DiningParseWarning[]`:**
+`no_hours_extracted`, `hours_format_unrecognized`, `page_timeout`. Live
+baseline shows 3 venues with `hours_format_unrecognized` (Maroon Market "24
+Hours" format - legitimate, not a parser bug).
+
+**Server-side routing:** SERVER_INSTRUCTIONS gains a 7th rule routing dining
+questions to the 2 new tools.
+
+**DIN1-DIN6 security checks (+15 pts; 269 -> 284 Linux CI):** allowlist URL
+discipline, frozen DINING_ROOTS, Worker input-length caps, build-time
+poisoned-corpus aborts, DINING_DISCLAIMER presence, polite-scraping policy
+visible in scraper.ts source.
