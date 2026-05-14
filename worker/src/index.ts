@@ -2147,7 +2147,7 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Mc
     case "health_check": {
       return jsonContent({
         runtime: "cloudflare-workers",
-        version: "1.0.2",
+        version: "1.1.0",
         index_row_count: corpus.indexRowCount,
         policies_in_corpus: POLICIES.length,
         corpus_built_at: corpus.builtAt,
@@ -2274,7 +2274,7 @@ async function handleRpc(req: JsonRpcRequest): Promise<JsonRpcResponse | null> {
         id,
         result: {
           protocolVersion: PROTOCOL_VERSION,
-          serverInfo: { name: "msstate-policies", version: "1.0.2" },
+          serverInfo: { name: "msstate-policies", version: "1.1.0" },
           capabilities: { tools: { listChanged: false } },
           instructions: SERVER_INSTRUCTIONS,
         },
@@ -2345,7 +2345,7 @@ export default {
           JSON.stringify(
             {
               name: "msstate-policies-mcp",
-              version: "1.0.2",
+              version: "1.1.0",
               runtime: "cloudflare-workers",
               policies: POLICIES.length,
               builtAt: corpus.builtAt,
