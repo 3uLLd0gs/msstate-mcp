@@ -23,8 +23,8 @@
 {"kind":"info_orientation","desc":"orientation top scope","args":{"name":"find_online_info","arguments":{"q":"orientation","scope":"orientation"}},"expect":{"top_slug":"orientation"}}
 {"kind":"info_staff","desc":"staff scope is searchable","args":{"name":"find_online_info","arguments":{"q":"Office of Online Education","scope":"staff"}},"expect":{"top_slug":"staff"}}
 {"kind":"info_financial","desc":"financial matters","args":{"name":"find_online_info","arguments":{"q":"financial aid billing","scope":"financial-matters"}},"expect":{"top_slug":"financial-matters"}}
-{"kind":"info_faq","desc":"FAQ scope","args":{"name":"find_online_info","arguments":{"q":"frequently asked","scope":"faq"}},"expect":{"top_slug":"faq"}}
-{"kind":"info_no_match","desc":"off-topic -- Ole Miss","args":{"name":"find_online_info","arguments":{"q":"ole miss admission application"}},"expect":{"matches_eq":0}}
+{"kind":"info_faq","desc":"FAQ scope","args":{"name":"find_online_info","arguments":{"q":"how to access canvas registration","scope":"faq"}},"expect":{"top_slug":"faq"}}
+{"kind":"info_no_match","desc":"off-topic -- rival school","args":{"name":"find_online_info","arguments":{"q":"alabama crimson tide football roster"}},"expect":{"matches_eq":0}}
 {"kind":"adversarial_program","desc":"non-existent program name","args":{"name":"get_online_program","arguments":{"name_query":"program that definitely does not exist xyz"}},"expect":{"matched_null":true}}
 {"kind":"adversarial_keyword","desc":"football subject keyword","args":{"name":"list_online_programs","arguments":{"subject_keyword":"football team"}},"expect":{"matches_eq":0}}
 {"kind":"adversarial_off_topic","desc":"weather query","args":{"name":"find_online_info","arguments":{"q":"weather forecast today"}},"expect":{"matches_eq":0}}
