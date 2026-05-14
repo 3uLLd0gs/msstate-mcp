@@ -646,4 +646,76 @@ else
   note "FAIL" "ONL5 ONLINE_DISCLAIMER missing from types.ts or one of the tool files" 2
 fi
 
+# =============================================================================
+# Dining module checks (DIN1-DIN6, added 2026-05-14). +15 pts total.
+# =============================================================================
+
+# DIN1: All https:// URLs in msstate-policies/src/dining/ stay on msstate.edu or mydininghub.com.
+DIN_NON_ALLOWLIST=$(grep -rE 'https://[^"'"'"'[:space:])]+' msstate-policies/src/dining 2>/dev/null \
+  | grep -vE 'https://[^/]*(msstate\.edu|mydininghub\.com)' \
+  | wc -l | tr -d ' ')
+if [ "$DIN_NON_ALLOWLIST" = "0" ]; then
+  score=$((score + 3))
+  note "PASS" "DIN1 all dining-module URLs stay on msstate.edu or mydininghub.com" 3
+else
+  note "FAIL" "DIN1 found $DIN_NON_ALLOWLIST off-allowlist URLs in src/dining/" 3
+fi
+
+# DIN2: DINING_ROOTS frozen allowlist present in types.ts.
+if grep -qE 'export const DINING_ROOTS.*=.*Object\.freeze\(' msstate-policies/src/dining/types.ts 2>/dev/null; then
+  score=$((score + 2))
+  note "PASS" "DIN2 DINING_ROOTS frozen allowlist present" 2
+else
+  note "FAIL" "DIN2 DINING_ROOTS missing or not frozen" 2
+fi
+
+# DIN3: Worker length-caps name_substring + name_query + slug.
+DIN3_OK=1
+for case_name in "list_msu_dining_locations" "get_msu_dining_hours"; do
+  if ! grep -nA 12 "case \"$case_name\":" worker/src/index.ts | grep -q "MAX_QUERY_CHARS"; then
+    DIN3_OK=0
+  fi
+done
+if [ "$DIN3_OK" = "1" ]; then
+  score=$((score + 3))
+  note "PASS" "DIN3 Worker length-caps string inputs on dining tools" 3
+else
+  note "FAIL" "DIN3 Worker missing length-cap on at least one dining tool" 3
+fi
+
+# DIN4: Build aborts with canonical string on poisoned dining corpus (>=6 sites).
+DIN4_COUNT=$(grep -c "refusing to ship a poisoned dining corpus" scripts/build-worker-corpus.mjs 2>/dev/null | tr -d ' ')
+DIN4_COUNT=${DIN4_COUNT:-0}
+if [ "$DIN4_COUNT" -ge "6" ] 2>/dev/null; then
+  score=$((score + 2))
+  note "PASS" "DIN4 build aborts on poisoned dining corpus ($DIN4_COUNT sites)" 2
+else
+  note "FAIL" "DIN4 only $DIN4_COUNT 'refusing to ship a poisoned dining corpus' sites (need >=6)" 2
+fi
+
+# DIN5: DINING_DISCLAIMER referenced in types.ts + both tool files.
+DIN5_OK=1
+if ! grep -q 'DINING_DISCLAIMER' msstate-policies/src/dining/types.ts 2>/dev/null; then DIN5_OK=0; fi
+for f in list_msu_dining_locations get_msu_dining_hours; do
+  if ! grep -q 'DINING_DISCLAIMER' "msstate-policies/src/tools/${f}.ts" 2>/dev/null; then DIN5_OK=0; fi
+done
+if [ "$DIN5_OK" = "1" ]; then
+  score=$((score + 2))
+  note "PASS" "DIN5 DINING_DISCLAIMER present in types.ts + 2 tool files" 2
+else
+  note "FAIL" "DIN5 DINING_DISCLAIMER missing from types.ts or one of the tool files" 2
+fi
+
+# DIN6: politeFetch / UA pool / scroll visible in scraper source (anti-bot policy).
+DIN6_OK=1
+if ! grep -qE 'UA_POOL' msstate-policies/src/dining/scraper.ts 2>/dev/null; then DIN6_OK=0; fi
+if ! grep -qE 'randomScroll|scroll' msstate-policies/src/dining/scraper.ts 2>/dev/null; then DIN6_OK=0; fi
+if ! grep -qE 'jitter|setTimeout.*Math\.random' msstate-policies/src/dining/scraper.ts 2>/dev/null; then DIN6_OK=0; fi
+if [ "$DIN6_OK" = "1" ]; then
+  score=$((score + 3))
+  note "PASS" "DIN6 polite-scraping (UA pool + scroll + jitter) visible in scraper.ts" 3
+else
+  note "FAIL" "DIN6 polite-scraping policy not visible in scraper.ts" 3
+fi
+
 echo "$score"
