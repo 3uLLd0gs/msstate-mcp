@@ -60,6 +60,7 @@ export const health_check = {
       embeddings_loaded: boolean;
       embedding_chunks: number;
       disk_cache_enabled: boolean;
+      courses_parse_quality: ReturnType<typeof coursesParseQuality>;
     } = {
       index_row_count: rowCount,
       last_index_fetch: sh.lastIndexFetch,
