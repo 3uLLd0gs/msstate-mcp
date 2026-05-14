@@ -1,0 +1,15 @@
+{"kind":"location_slug_lookup","desc":"perry-food-hall by slug","args":{"name":"get_msu_dining_hours","arguments":{"slug":"perry-food-hall"}},"expect":{"matched_slug":"perry-food-hall"}}
+{"kind":"location_slug_lookup","desc":"chick-fil-a by slug","args":{"name":"get_msu_dining_hours","arguments":{"slug":"chick-fil-a"}},"expect":{"matched_slug":"chick-fil-a"}}
+{"kind":"location_slug_lookup","desc":"juva by slug","args":{"name":"get_msu_dining_hours","arguments":{"slug":"juva"}},"expect":{"matched_slug":"juva"}}
+{"kind":"location_name_query","desc":"'perry' fuzzy resolves perry-food-hall","args":{"name":"get_msu_dining_hours","arguments":{"name_query":"perry"}},"expect":{"matched_slug":"perry-food-hall"}}
+{"kind":"location_name_query","desc":"'chickfila' fuzzy resolves chick-fil-a","args":{"name":"get_msu_dining_hours","arguments":{"name_query":"chickfila"}},"expect":{"matched_slug":"chick-fil-a"}}
+{"kind":"location_name_query","desc":"'azalea market' fuzzy resolves a maroon-market-* venue","args":{"name":"get_msu_dining_hours","arguments":{"name_query":"azalea market"}},"expect":{"matched_slug_prefix":"maroon-market-"}}
+{"kind":"list_filter","desc":"total >= 20","args":{"name":"list_msu_dining_locations","arguments":{}},"expect":{"total_min":20}}
+{"kind":"list_filter","desc":"name_substring 'market' returns >=1","args":{"name":"list_msu_dining_locations","arguments":{"name_substring":"market"}},"expect":{"matches_min":1}}
+{"kind":"list_filter","desc":"limit=5 returns at most 5","args":{"name":"list_msu_dining_locations","arguments":{"limit":5}},"expect":{"matches_max":5}}
+{"kind":"open_status_check","desc":"perry status_now is recognized","args":{"name":"get_msu_dining_hours","arguments":{"slug":"perry-food-hall"}},"expect":{"status_one_of":["open","closed","unknown","opens_at","closes_at"]}}
+{"kind":"open_status_check","desc":"chick-fil-a status_now is recognized","args":{"name":"get_msu_dining_hours","arguments":{"slug":"chick-fil-a"}},"expect":{"status_one_of":["open","closed","unknown","opens_at","closes_at"]}}
+{"kind":"open_status_check","desc":"juva status_now is recognized","args":{"name":"get_msu_dining_hours","arguments":{"slug":"juva"}},"expect":{"status_one_of":["open","closed","unknown","opens_at","closes_at"]}}
+{"kind":"adversarial","desc":"unknown slug returns matched=null","args":{"name":"get_msu_dining_hours","arguments":{"slug":"this-does-not-exist"}},"expect":{"matched_null":true,"not_found_reason_nonempty":true}}
+{"kind":"adversarial","desc":"keyword that matches nothing","args":{"name":"list_msu_dining_locations","arguments":{"name_substring":"alabama crimson tide football"}},"expect":{"matches_eq":0}}
+{"kind":"adversarial","desc":"empty slug rejected by zod","args":{"name":"get_msu_dining_hours","arguments":{"slug":""}},"expect":{"throws":true}}
