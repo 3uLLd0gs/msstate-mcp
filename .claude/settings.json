@@ -16,5 +16,33 @@
         "repo": "phuryn/pm-skills"
       }
     }
+  },
+  "permissions": {
+    "deny": [
+      "Bash(rm -rf /:*)",
+      "Bash(rm -rf ~:*)",
+      "Bash(rm -rf $HOME:*)",
+      "Bash(rm -rf ..:*)",
+      "Bash(:(){ :|:& };:)",
+      "Bash(git config --global*)",
+      "Bash(git push --force*main*)",
+      "Bash(git push --force-with-lease*main*)",
+      "Bash(git reset --hard origin/main)",
+      "Bash(git push *no-verify*)",
+      "Bash(git commit *no-verify*)",
+      "Bash(curl *| sh*)",
+      "Bash(curl *| bash*)",
+      "Bash(wget *| sh*)",
+      "Bash(wget *| bash*)",
+      "Bash(npm publish *ignore-scripts*)",
+      "Bash(sudo:*)",
+      "Bash(chmod 777:*)",
+      "Bash(* > /dev/*)",
+      "Write(/dev/*)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(~/.ssh/*)",
+      "Read(~/.aws/credentials)"
+    ]
   }
 }
