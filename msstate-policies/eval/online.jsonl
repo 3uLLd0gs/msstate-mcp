@@ -1,0 +1,30 @@
+{"kind":"program_slug_lookup","desc":"MBA by slug","args":{"name":"get_online_program","arguments":{"slug":"mba"}},"expect":{"matched_name_contains":"Business Administration","matched_contacts_min":1}}
+{"kind":"program_slug_lookup","desc":"BSEE by slug","args":{"name":"get_online_program","arguments":{"slug":"bsee"}},"expect":{"matched_degree_level":"bachelor","matched_contacts_msstate_email":true}}
+{"kind":"program_name_query","desc":"psychology bachelor by name","args":{"name":"get_online_program","arguments":{"name_query":"online psychology bachelor"}},"expect":{"matched_slug":"psychology"}}
+{"kind":"program_deadlines","desc":"MBA has August deadline","args":{"name":"get_online_program","arguments":{"slug":"mba"}},"expect":{"deadlines_contain_term_date":["Fall","August"]}}
+{"kind":"program_certificate","desc":"addiction counseling certificate","args":{"name":"get_online_program","arguments":{"slug":"adcn"}},"expect":{"matched_degree_level":"certificate"}}
+{"kind":"program_doctoral","desc":"PhD CSE","args":{"name":"get_online_program","arguments":{"slug":"phcse"}},"expect":{"matched_degree_level":"doctoral"}}
+{"kind":"program_slug_lookup","desc":"data science master","args":{"name":"get_online_program","arguments":{"slug":"msdata"}},"expect":{"matched_degree_level":"master"}}
+{"kind":"program_unknown","desc":"unknown slug returns null + reason","args":{"name":"get_online_program","arguments":{"slug":"this-slug-does-not-exist"}},"expect":{"matched_null":true,"not_found_reason_nonempty":true}}
+{"kind":"list_by_level","desc":"doctoral count >= 15","args":{"name":"list_online_programs","arguments":{"level":"doctoral"}},"expect":{"filtered_total_min":15}}
+{"kind":"list_by_level","desc":"bachelor count >= 25","args":{"name":"list_online_programs","arguments":{"level":"bachelor"}},"expect":{"filtered_total_min":25}}
+{"kind":"list_by_keyword","desc":"engineering programs","args":{"name":"list_online_programs","arguments":{"subject_keyword":"engineering"}},"expect":{"matches_min":3}}
+{"kind":"list_total","desc":"total >= 100","args":{"name":"list_online_programs","arguments":{}},"expect":{"total_min":100}}
+{"kind":"list_paging","desc":"limit=5 returns at most 5","args":{"name":"list_online_programs","arguments":{"limit":5}},"expect":{"matches_max":5}}
+{"kind":"list_empty","desc":"keyword that matches nothing","args":{"name":"list_online_programs","arguments":{"subject_keyword":"football schedule game day"}},"expect":{"matches_eq":0}}
+{"kind":"admissions_ug","desc":"undergrad section mentions transcripts","args":{"name":"get_online_admissions_process","arguments":{"student_type":"undergraduate"}},"expect":{"section_undergraduate_contains_any":["test-optional","transcripts","high school"]}}
+{"kind":"admissions_intl","desc":"international section mentions TOEFL/IELTS","args":{"name":"get_online_admissions_process","arguments":{"student_type":"international"}},"expect":{"section_international_contains_any":["TOEFL","IELTS"]}}
+{"kind":"admissions_all","desc":"no filter returns all 5 sections","args":{"name":"get_online_admissions_process","arguments":{}},"expect":{"all_5_sections_present":true}}
+{"kind":"admissions_contact","desc":"central email is ask@online.msstate.edu","args":{"name":"get_online_admissions_process","arguments":{}},"expect":{"central_email_eq":"ask@online.msstate.edu"}}
+{"kind":"admissions_apply_urls","desc":"apply URLs include both apply + grad","args":{"name":"get_online_admissions_process","arguments":{}},"expect":{"external_apply_contains_substrs":["apply.msstate.edu","grad.msstate.edu"]}}
+{"kind":"info_state_auth","desc":"state authorization scope","args":{"name":"find_online_info","arguments":{"q":"does MSU online operate in my state","scope":"state-authorization"}},"expect":{"top_slug":"state-authorization"}}
+{"kind":"info_military","desc":"military assistance","args":{"name":"find_online_info","arguments":{"q":"military tuition assistance"}},"expect":{"any_slug":"military-assistance"}}
+{"kind":"info_honorlock","desc":"Honorlock proctoring","args":{"name":"find_online_info","arguments":{"q":"Honorlock proctoring"}},"expect":{"any_full_body_contains":"Honorlock"}}
+{"kind":"info_orientation","desc":"orientation top scope","args":{"name":"find_online_info","arguments":{"q":"orientation","scope":"orientation"}},"expect":{"top_slug":"orientation"}}
+{"kind":"info_staff","desc":"staff scope is searchable","args":{"name":"find_online_info","arguments":{"q":"Office of Online Education","scope":"staff"}},"expect":{"top_slug":"staff"}}
+{"kind":"info_financial","desc":"financial matters","args":{"name":"find_online_info","arguments":{"q":"financial aid billing","scope":"financial-matters"}},"expect":{"top_slug":"financial-matters"}}
+{"kind":"info_faq","desc":"FAQ scope","args":{"name":"find_online_info","arguments":{"q":"frequently asked","scope":"faq"}},"expect":{"top_slug":"faq"}}
+{"kind":"info_no_match","desc":"off-topic -- Ole Miss","args":{"name":"find_online_info","arguments":{"q":"ole miss admission application"}},"expect":{"matches_eq":0}}
+{"kind":"adversarial_program","desc":"non-existent program name","args":{"name":"get_online_program","arguments":{"name_query":"program that definitely does not exist xyz"}},"expect":{"matched_null":true}}
+{"kind":"adversarial_keyword","desc":"football subject keyword","args":{"name":"list_online_programs","arguments":{"subject_keyword":"football team"}},"expect":{"matches_eq":0}}
+{"kind":"adversarial_off_topic","desc":"weather query","args":{"name":"find_online_info","arguments":{"q":"weather forecast today"}},"expect":{"matches_eq":0}}
