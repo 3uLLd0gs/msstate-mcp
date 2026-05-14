@@ -357,7 +357,7 @@ else
 fi
 
 # SYN4: No runtime egress to Anthropic. Only the build script may reference api.anthropic.com.
-RT_ANTHROPIC=$(grep -rn "api\.anthropic\.com" msstate-policies/src worker/src 2>/dev/null | wc -l)
+RT_ANTHROPIC=$(grep -rn "api\.anthropic\.com" msstate-policies/src worker/src 2>/dev/null | wc -l | tr -d ' ')
 if [ "$RT_ANTHROPIC" = "0" ]; then
   score=$((score + 10))
   note "PASS" "SYN4 zero runtime egress to api.anthropic.com" 10
@@ -377,7 +377,7 @@ fi
 # Catches property access (.synonyms), JSON keys ("synonyms":), and array
 # destructuring (synonyms:) — but NOT the bare word "synonyms" appearing
 # inside a user-facing mode-note string (e.g., "BM25 with synonyms").
-TOOLS_SYN=$(grep -rnE '\.synonyms\b|"synonyms"\s*:|\bsynonyms\s*:|\{[^}]*\bsynonyms\b[^}]*\}' msstate-policies/src/tools 2>/dev/null | wc -l)
+TOOLS_SYN=$(grep -rnE '\.synonyms\b|"synonyms"\s*:|\bsynonyms\s*:|\{[^}]*\bsynonyms\b[^}]*\}' msstate-policies/src/tools 2>/dev/null | wc -l | tr -d ' ')
 if [ "$TOOLS_SYN" = "0" ]; then
   score=$((score + 2))
   note "PASS" "SYN6 no row.synonyms property access in src/tools/" 2
