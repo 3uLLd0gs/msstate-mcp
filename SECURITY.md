@@ -64,6 +64,27 @@ The corpus rebuild step (`scripts/build-worker-corpus.mjs`) transits each calend
 - **Key compromise scope.** A leaked `ANTHROPIC_API_KEY` can only spend the operator's Anthropic quota. Cannot read the corpus, cannot pivot to MSU, cannot impersonate the tool at runtime. Rotation: change the env var, re-run build.
 - **Zero runtime egress.** Production deployments (Worker, npm) make **no third-party API calls** to serve queries. SYN4 in the security checklist enforces this via grep — `api.anthropic.com` must never appear in `msstate-policies/src/` or `worker/src/`.
 
+### Build-time scraping of mydininghub.com (v1.1.0)
+
+The dining module (v1.1.0+) fetches data from `msstatedining.mydininghub.com`,
+the Compass Group Touchpoint platform that `dining.msstate.edu` officially
+redirects to. We treat this as MSU-authoritative under the expanded corpus
+rule in CLAUDE.md (`*.msstate.edu` plus any domain an `*.msstate.edu` URL
+200-redirects to).
+
+Scraping is once-daily from a GitHub Actions runner, sequential per-location
+(concurrency = 1), with randomized inter-request delays (1500-4500 ms) and
+a realistic Chrome user agent. Attribution via `X-Source: msstate-policies-mcp`
+header on plain HTTP fetches (sitemap pass). The header is NOT set on the
+Playwright browser context because Touchpoint's WAF false-positives on it,
+redirecting location pages to /en/locations. Robots.txt is honored (no
+disallow rules at this writing). No authenticated views are accessed.
+
+If MSU or Compass Group requests we stop scraping `msstatedining.mydininghub.com`,
+we comply and deprecate the dining module within one release cycle. The
+two MCP tools would return `not_found_reason: "Dining data has been removed
+at vendor request"` until removed.
+
 ## Out of scope: client-side circumvention
 
 Several abuse classes that come up in MCP threat-modelling are **explicitly outside this server's threat model**, because the trust principal is the user / their LLM / their machine — not us. The maintainer disclaims responsibility for the following:
