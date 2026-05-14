@@ -36,6 +36,7 @@ import type {
   StudentType,
   OnlineAdmissionsProcess,
   OnlineStaffEntry,
+  OnlineInfoPage,
 } from "./types.js";
 
 /** Sentinel value replaced by the scraper with the actual fetch timestamp. */
@@ -848,4 +849,67 @@ export function parseStaffDirectoryHtml(
   });
 
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// parseSupportPageHtml
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a support info page (state-authorization, military-assistance,
+ * orientation, faq, financial-matters) into an OnlineInfoPage record.
+ *
+ * This is a generic markdown converter that handles any Drupal page
+ * with a standard structure. It extracts:
+ *   - title: from h1 (or fallback to page title or slug)
+ *   - body_markdown: markdown-formatted text from h1-h4, p, li elements
+ *
+ * Selector strategy:
+ *   Extract all h1/h2/h3/h4/p/li text from the page. Convert headings
+ *   to markdown (h1 → #, h2 → ##, etc.), list items to "- text", paragraphs
+ *   to plain text. Collapse multiple newlines and trim.
+ */
+export function parseSupportPageHtml(
+  html: string,
+  slug: string,
+  pageUrl: string,
+): OnlineInfoPage {
+  const $ = cheerioLoad(html);
+
+  // Title: try h1 first, then h1 fallback, then page title, then slug
+  const title =
+    $("main h1").first().text().replace(/\s+/g, " ").trim() ||
+    $("h1").first().text().replace(/\s+/g, " ").trim() ||
+    $("title").text().replace(/\s+/g, " ").trim() ||
+    slug;
+
+  // Convert main body to markdown-ish:
+  //  h1 → # ; h2 → ## ; h3 → ### ; h4 → #### ; <li> → "- text" ; <p> → text
+  const lines: string[] = [];
+  $("h1, h2, h3, h4, p, li").each((_, el) => {
+    const $el = $(el);
+    const tagName = el.type === "tag" ? el.name.toLowerCase() : "";
+    const text = $el.text().replace(/\s+/g, " ").trim();
+    if (text.length === 0) return;
+
+    if (tagName === "h1") lines.push(`# ${text}`);
+    else if (tagName === "h2") lines.push(`\n## ${text}`);
+    else if (tagName === "h3") lines.push(`\n### ${text}`);
+    else if (tagName === "h4") lines.push(`\n#### ${text}`);
+    else if (tagName === "li") lines.push(`- ${text}`);
+    else lines.push(text);
+  });
+
+  const body_markdown = lines
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return {
+    slug,
+    title,
+    url: pageUrl,
+    body_markdown,
+    retrieved_at: RETRIEVED_AT_PLACEHOLDER,
+  };
 }
