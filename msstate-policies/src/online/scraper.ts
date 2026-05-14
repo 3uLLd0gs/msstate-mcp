@@ -159,7 +159,7 @@ export async function scrapeAllOnline(opts: ScrapeAllOptions = {}): Promise<Scra
     }
     try {
       const html = await fetcher(programUrl);
-      const program = parseProgramHtml(html, entry.slug, entry.degree_level, programUrl);
+      const program = parseProgramHtml(html, entry.slug, entry.degree_level, programUrl, entry.short_description);
       if (!program) return { slug: entry.slug, program: null, error: "parse returned null" };
       return { slug: entry.slug, program: { ...program, retrieved_at }, error: null as string | null };
     } catch (e) {

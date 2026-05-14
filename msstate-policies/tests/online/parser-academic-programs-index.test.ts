@@ -43,6 +43,17 @@ describe("parseAcademicProgramsIndex", () => {
     const entries = parseAcademicProgramsIndex(FIXTURE, PAGE_URL);
     assert.ok(entries.some((e) => e.degree_level === "doctoral"));
   });
+  test("extracts short_description from Prg-card-description for most entries (v1.0.1)", () => {
+    const entries = parseAcademicProgramsIndex(FIXTURE, PAGE_URL);
+    const withDesc = entries.filter((e) => e.short_description.length >= 20).length;
+    assert.ok(withDesc / entries.length > 0.7, `only ${withDesc}/${entries.length} entries have a description`);
+  });
+  test("MBA short_description contains substantive marketing text (v1.0.1)", () => {
+    const entries = parseAcademicProgramsIndex(FIXTURE, PAGE_URL);
+    const mba = entries.find((e) => e.slug === "mba");
+    assert.ok(mba);
+    assert.ok(mba.short_description.length >= 20, `short_description: ${JSON.stringify(mba.short_description)}`);
+  });
   test("returns [] on input with no program list", () => {
     const empty = parseAcademicProgramsIndex(
       "<html><body><p>nothing here</p></body></html>",
