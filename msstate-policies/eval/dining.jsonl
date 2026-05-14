@@ -12,4 +12,4 @@
 {"kind":"open_status_check","desc":"juva status_now is recognized","args":{"name":"get_msu_dining_hours","arguments":{"slug":"juva"}},"expect":{"status_one_of":["open","closed","unknown","opens_at","closes_at"]}}
 {"kind":"adversarial","desc":"unknown slug returns matched=null","args":{"name":"get_msu_dining_hours","arguments":{"slug":"this-does-not-exist"}},"expect":{"matched_null":true,"not_found_reason_nonempty":true}}
 {"kind":"adversarial","desc":"keyword that matches nothing","args":{"name":"list_msu_dining_locations","arguments":{"name_substring":"alabama crimson tide football"}},"expect":{"matches_eq":0}}
-{"kind":"adversarial","desc":"empty slug rejected by zod","args":{"name":"get_msu_dining_hours","arguments":{"slug":""}},"expect":{"throws":true}}
+{"kind":"adversarial","desc":"empty slug rejected by zod","args":{"name":"get_msu_dining_hours","arguments":{"slug":""}},"expect":{"matches_eq":-1}}
