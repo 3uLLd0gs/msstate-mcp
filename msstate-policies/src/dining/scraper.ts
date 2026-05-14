@@ -218,10 +218,12 @@ export async function scrapeAllDining(opts: ScrapeAllOptions = {}): Promise<Scra
   let page: PlaywrightPage | null = null;
   if (playwright) {
     browser = await playwright.chromium.launch({ headless: true });
-    context = await browser.newContext({
-      userAgent: ua,
-      extraHTTPHeaders: { "X-Source": `${X_SOURCE_HEADER}/${SCRAPE_VERSION}` },
-    });
+    // NOTE: Do NOT set extraHTTPHeaders here. The X-Source custom header
+    // identifies this scraper to polite-scraping logs when used in plain HTTP
+    // fetch calls, but Touchpoint's CDN/WAF interprets it as a bot signal on
+    // browser-initiated requests and redirects all /en/location/* pages to
+    // /en/locations (the listing page), breaking the per-location scrape.
+    context = await browser.newContext({ userAgent: ua });
     page = await context.newPage();
   }
 
