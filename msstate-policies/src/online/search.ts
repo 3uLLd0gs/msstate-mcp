@@ -11,6 +11,8 @@ import type {
   OnlineProgram,
   OnlineStaffEntry,
   DegreeLevel,
+  StaffEntry,
+  StaffToProgramsIndex,
 } from "./types.js";
 
 const TOKEN_SPLIT = /[\s\-_/.,;:()\[\]{}!?"'`<>|@#$%^&*=+]+/;
@@ -279,4 +281,69 @@ export function fuzzyResolveProgram(programs: OnlineProgram[], query: string): {
 } {
   const r = resolveProgram(programs, query);
   return { matched: r.matched, did_you_mean: r.did_you_mean };
+}
+
+// ---- Staff resolver for list_programs_by_staff -----------------------------
+
+function normalizeForMatch(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "") // strip combining diacritics
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export interface StaffMatch extends StaffEntry {
+  match_kind: "email" | "substring" | "all_tokens";
+}
+
+export function resolveStaff(index: StaffToProgramsIndex, query: string): StaffMatch[] {
+  const q = query.trim().toLowerCase();
+  if (q.length === 0) return [];
+
+  // Email path — exact match
+  if (q.includes("@")) {
+    return index
+      .filter((s) => s.email && s.email.toLowerCase() === q)
+      .map((s) => ({ ...s, match_kind: "email" as const }));
+  }
+
+  // Name path — diacritic-normalized substring or all-tokens-present
+  const qNorm = normalizeForMatch(q);
+  const qTokens = qNorm.split(" ").filter((t) => t.length > 0);
+  const matches: StaffMatch[] = [];
+  for (const s of index) {
+    const nameNorm = normalizeForMatch(s.display_name);
+    if (nameNorm.includes(qNorm)) {
+      matches.push({ ...s, match_kind: "substring" });
+    } else if (qTokens.length > 0 && qTokens.every((t) => nameNorm.includes(t))) {
+      matches.push({ ...s, match_kind: "all_tokens" });
+    }
+  }
+
+  const kindOrder = (k: StaffMatch["match_kind"]): number =>
+    k === "email" ? 0 : k === "substring" ? 1 : 2;
+
+  matches.sort((a, b) =>
+    kindOrder(a.match_kind) - kindOrder(b.match_kind) ||
+    a.display_name.length - b.display_name.length,
+  );
+  return matches;
+}
+
+/**
+ * Suggest closest staff names for did_you_mean. Uses trigramScore over
+ * normalized display names. Returns up to 3 names with score > 0.2.
+ * Returns [] for queries shorter than 2 normalized characters.
+ */
+export function suggestStaff(index: StaffToProgramsIndex, query: string): string[] {
+  const qNorm = normalizeForMatch(query);
+  if (qNorm.length < 2) return [];
+  const scored = index.map((s) => ({
+    name: s.display_name,
+    score: trigramScore(qNorm, normalizeForMatch(s.display_name)),
+  }));
+  scored.sort((a, b) => b.score - a.score);
+  return scored.filter((x) => x.score > 0.2).slice(0, 3).map((x) => x.name);
 }
