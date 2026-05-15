@@ -932,6 +932,10 @@ interface OnlineStaffEntry {
 interface OnlineInfoPage {
   slug: string; title: string; url: string; body_markdown: string; retrieved_at: string;
 }
+type ProgramRef = { slug: string; name: string; role_in_program: string };
+type StaffEntry = { display_name: string; email: string | null; role: string; programs: ProgramRef[] };
+type StaffMatch = StaffEntry & { match_kind: "email" | "substring" | "all_tokens" };
+
 interface OnlineCorpus {
   builtAt: string;
   source: string;
@@ -939,10 +943,14 @@ interface OnlineCorpus {
   admissions_process: OnlineAdmissionsProcess;
   staff: OnlineStaffEntry[];
   info_pages: OnlineInfoPage[];
+  staff_to_programs?: StaffEntry[];
 }
 
 const ONLINE: OnlineCorpus | null =
   (corpus as { online_education?: OnlineCorpus }).online_education ?? null;
+
+const ONLINE_STAFF_INDEX: StaffEntry[] =
+  (ONLINE?.staff_to_programs as StaffEntry[] | undefined) ?? [];
 
 const ONLINE_DISCLAIMER =
   "Contact info, application deadlines, tuition, and program details on online.msstate.edu can change between releases. Verify against the source URL before applying.";
@@ -1053,10 +1061,110 @@ function onlFilterPrograms(req: { level?: DegreeLevel; subject_keyword?: string;
   };
 }
 
-function onlFuzzyResolveProgram(query: string): { matched: OnlineProgram | null; did_you_mean: Array<{ slug: string; name: string }> } {
+function workerNormalizeForMatch(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function workerTrigrams(s: string): Set<string> {
+  const padded = ` ${s} `;
+  const out = new Set<string>();
+  for (let i = 0; i <= padded.length - 3; i++) out.add(padded.slice(i, i + 3));
+  return out;
+}
+
+function workerTrigramScore(a: string, b: string): number {
+  if (!a || !b) return 0;
+  const A = workerTrigrams(a);
+  const B = workerTrigrams(b);
+  if (A.size === 0 || B.size === 0) return 0;
+  let inter = 0;
+  for (const t of A) if (B.has(t)) inter++;
+  const union = A.size + B.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
+
+function workerResolveStaff(index: StaffEntry[], query: string): StaffMatch[] {
+  const q = query.trim().toLowerCase();
+  if (q.length === 0) return [];
+  if (q.includes("@")) {
+    return index
+      .filter((s) => s.email && s.email.toLowerCase() === q)
+      .map((s) => ({ ...s, match_kind: "email" as const }));
+  }
+  const qNorm = workerNormalizeForMatch(q);
+  const qTokens = qNorm.split(" ").filter((t) => t.length > 0);
+  const matches: StaffMatch[] = [];
+  for (const s of index) {
+    const nameNorm = workerNormalizeForMatch(s.display_name);
+    if (nameNorm.includes(qNorm)) {
+      matches.push({ ...s, match_kind: "substring" });
+    } else if (qTokens.length > 0 && qTokens.every((t) => nameNorm.includes(t))) {
+      matches.push({ ...s, match_kind: "all_tokens" });
+    }
+  }
+  const order = (k: StaffMatch["match_kind"]): number =>
+    k === "email" ? 0 : k === "substring" ? 1 : 2;
+  matches.sort((a, b) =>
+    order(a.match_kind) - order(b.match_kind) ||
+    a.display_name.length - b.display_name.length,
+  );
+  return matches;
+}
+
+function workerSuggestStaff(index: StaffEntry[], query: string): string[] {
+  const qNorm = workerNormalizeForMatch(query);
+  if (qNorm.length < 2) return [];
+  return index
+    .map((s) => ({
+      name: s.display_name,
+      score: workerTrigramScore(qNorm, workerNormalizeForMatch(s.display_name)),
+    }))
+    .sort((a, b) => b.score - a.score)
+    .filter((x) => x.score > 0.2)
+    .slice(0, 3)
+    .map((x) => x.name);
+}
+
+const WORKER_PROGRAM_STOP_WORDS = new Set(["online", "program", "degree", "msu", "msstate"]);
+
+function workerTokenizeProgram(s: string): string[] {
+  return tokenize(s).filter((t) => !WORKER_PROGRAM_STOP_WORDS.has(t));
+}
+
+function onlFuzzyResolveProgram(query: string): {
+  matched: OnlineProgram | null;
+  did_you_mean: Array<{ slug: string; name: string }>;
+  match_strategy: "substring" | "bm25" | "no_signal" | "no_match";
+} {
   const programs = ONLINE?.programs ?? [];
-  const qTokens = tokenize(query);
-  if (qTokens.length === 0) return { matched: null, did_you_mean: [] };
+  const qTokens = workerTokenizeProgram(query);
+  if (qTokens.length === 0) {
+    return { matched: null, did_you_mean: [], match_strategy: "no_signal" };
+  }
+  const qNorm = qTokens.join(" ");
+
+  const substringHits: Array<{ p: OnlineProgram; strength: number }> = [];
+  for (const p of programs) {
+    const slugNorm = p.slug.toLowerCase().replace(/-/g, " ");
+    const nameNorm = p.name.toLowerCase();
+    if (slugNorm === qNorm) substringHits.push({ p, strength: 3 });
+    else if (slugNorm.includes(qNorm) || nameNorm.includes(qNorm)) substringHits.push({ p, strength: 2 });
+    else if (qTokens.every((t) => slugNorm.includes(t) || nameNorm.includes(t))) substringHits.push({ p, strength: 1 });
+  }
+  if (substringHits.length > 0) {
+    substringHits.sort((a, b) => b.strength - a.strength || a.p.name.length - b.p.name.length);
+    return {
+      matched: substringHits[0].p,
+      did_you_mean: substringHits.slice(1, 3).map((x) => ({ slug: x.p.slug, name: x.p.name })),
+      match_strategy: "substring",
+    };
+  }
+  // BM25 fallback — mirror stdio: 4× slug + 3× name + 1× short_description, with countOf
   const scored = programs.map((p) => {
     const slugT = tokenize(p.slug);
     const nameT = tokenize(p.name);
@@ -1070,10 +1178,13 @@ function onlFuzzyResolveProgram(query: string): { matched: OnlineProgram | null;
     return { p, score };
   }).filter((x) => x.score > 0);
   scored.sort((a, b) => b.score - a.score);
-  if (scored.length === 0) return { matched: null, did_you_mean: [] };
+  if (scored.length === 0) {
+    return { matched: null, did_you_mean: [], match_strategy: "no_match" };
+  }
   return {
     matched: scored[0].p,
     did_you_mean: scored.slice(1, 3).map((x) => ({ slug: x.p.slug, name: x.p.name })),
+    match_strategy: "bm25",
   };
 }
 
@@ -1523,6 +1634,21 @@ const TOOLS = [
         scope: { type: "string", enum: ["all","state-authorization","military-assistance","orientation","faq","financial-matters","staff"] },
       },
       required: ["q"],
+    },
+  },
+  {
+    name: "list_programs_by_staff",
+    description:
+      "Look up the MSU Online programs a Center for Distance Education staff member is responsible for. " +
+      "Query by email (preferred) or name (first, last, or full). Returns matching staff with full program portfolio + per-program role labels. " +
+      "Ambiguous names surface ≥2 matches; no match returns did_you_mean closest names.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", maxLength: 4096, description: "Email or name." },
+      },
+      required: ["query"],
+      additionalProperties: false,
     },
   },
   {
@@ -2016,7 +2142,11 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Mc
         const r = onlFuzzyResolveProgram(name_query);
         matched = r.matched;
         did_you_mean = r.did_you_mean;
-        if (!matched) not_found_reason = `No program matched '${name_query}'. Try list_online_programs(subject_keyword=…).`;
+        if (!matched) {
+          not_found_reason = r.match_strategy === "no_signal"
+            ? `Query '${name_query}' had no discriminating tokens after stripping common words (online, program, degree, msu, msstate). Add a program name or subject keyword.`
+            : `No program matched '${name_query}'. Try list_online_programs(subject_keyword=…).`;
+        }
       }
       return jsonContent({
         disclaimer: ONLINE_DISCLAIMER,
@@ -2085,6 +2215,31 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Mc
       });
     }
 
+    case "list_programs_by_staff": {
+      const a = args as Record<string, unknown>;
+      const query = typeof a.query === "string" ? a.query : "";
+      if (!query) return errorContent("query is required.");
+      if (query.length > MAX_QUERY_CHARS) return tooLong("query", query);
+      const matches = workerResolveStaff(ONLINE_STAFF_INDEX, query);
+      return jsonContent({
+        disclaimer: ONLINE_DISCLAIMER,
+        query,
+        match_count: matches.length,
+        matches: matches.map((m) => ({
+          staff: {
+            display_name: m.display_name,
+            email: m.email,
+            role: m.role,
+            match_kind: m.match_kind,
+          },
+          programs: m.programs,
+          program_count: m.programs.length,
+        })),
+        did_you_mean: matches.length === 0 ? workerSuggestStaff(ONLINE_STAFF_INDEX, query) : [],
+        corpus_built_at: ONLINE?.builtAt ?? null,
+      });
+    }
+
     case "list_msu_dining_locations": {
       const a = args as Record<string, unknown>;
       const open_now = typeof a.open_now === "boolean" ? a.open_now : undefined;
@@ -2147,7 +2302,7 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Mc
     case "health_check": {
       return jsonContent({
         runtime: "cloudflare-workers",
-        version: "1.1.0",
+        version: "1.1.1",
         index_row_count: corpus.indexRowCount,
         policies_in_corpus: POLICIES.length,
         corpus_built_at: corpus.builtAt,
@@ -2274,7 +2429,7 @@ async function handleRpc(req: JsonRpcRequest): Promise<JsonRpcResponse | null> {
         id,
         result: {
           protocolVersion: PROTOCOL_VERSION,
-          serverInfo: { name: "msstate-policies", version: "1.1.0" },
+          serverInfo: { name: "msstate-policies", version: "1.1.1" },
           capabilities: { tools: { listChanged: false } },
           instructions: SERVER_INSTRUCTIONS,
         },
@@ -2345,7 +2500,7 @@ export default {
           JSON.stringify(
             {
               name: "msstate-policies-mcp",
-              version: "1.1.0",
+              version: "1.1.1",
               runtime: "cloudflare-workers",
               policies: POLICIES.length,
               builtAt: corpus.builtAt,
