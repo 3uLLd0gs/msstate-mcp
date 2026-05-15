@@ -6,12 +6,17 @@ This file consolidates everything that used to live across `PLAN.md`, `PRD.md`, 
 
 ## What this is
 
-A Model Context Protocol server that exposes two MSU content areas:
+A Model Context Protocol server that exposes seven MSU content areas:
 
-- **Operating Policies** — the entire `/current` index at <https://www.policies.msstate.edu/current> (~218 policies).
+- **Operating Policies** — the entire `/current` index at <https://www.policies.msstate.edu/current> (~217 policies).
 - **Academic dates** — six msstate.edu sources (registrar academic + exam calendars, university holidays, graduate-school PDFs, financial aid, housing) — added in v0.4.0 (2026-05-11).
+- **Course catalog** — `catalog.msstate.edu` with full prereq DAG and `prereq_summary` diagnostic — added in v0.6.0 (2026-05-12), tightened in v0.9.0 (2026-05-13).
+- **Emergency guidance** — 12 guidelines + refuge areas + contacts on `emergency.msstate.edu` — added in v0.7.0 (2026-05-13).
+- **Tuition & fees** — 5 campuses + per-college fees + 14-question FAQ on `controller.msstate.edu` + `vetmed.msstate.edu` — added in v0.8.0 (2026-05-13).
+- **Online programs** — ~126 program pages + admissions + staff + 5 support pages on `online.msstate.edu` — added in v1.0.0 (2026-05-13).
+- **Dining** — ~24 venues with per-day hours and status_now (America/Chicago) on `dining.msstate.edu` → `msstatedining.mydininghub.com` — added in v1.1.0 (2026-05-14).
 
-Ask Claude (or Cursor / Windsurf / Zed / claude.ai / ChatGPT Plus connector) a natural-language question; the MCP fetches the relevant content straight from MSU and the model answers grounded in that text. Tool count: 7 (4 policy + 2 calendar + 1 health).
+Ask Claude (or Cursor / Windsurf / Zed / claude.ai / ChatGPT Plus connector) a natural-language question; the MCP fetches the relevant content straight from MSU and the model answers grounded in that text. Tool count: 24 (4 policy + 2 calendar + 3 course + 4 emergency + 4 tuition + 4 online + 2 dining + 1 health).
 
 Framed as a **portfolio piece + reusable .edu-content MCP template**, not an adoption-chasing product. Real audience is small (dozens, not thousands). Optimizations: build quality, eval rigor, template portability. Adoption metrics are watched, not gated.
 
@@ -43,7 +48,7 @@ msstate-mcp/                              # repo root = Claude Code marketplace
 │   ├── run-eval.mjs                      # MCP-driven eval harness
 │   └── sync-version.mjs                  # syncs package.json -> plugin.json
 ├── worker/                               # Cloudflare Worker variant (HTTP/JSON-RPC)
-│   ├── src/index.ts                      # MCP-over-HTTP, all 7 tools, BM25 only
+│   ├── src/index.ts                      # MCP-over-HTTP, all 24 tools, BM25 only
 │   ├── corpus.json                       # pre-extracted policies + academic_calendar block
 │   ├── wrangler.toml                     # Cloudflare deploy config
 │   ├── package.json                      # devDeps: wrangler, workers-types
@@ -64,7 +69,7 @@ msstate-mcp/                              # repo root = Claude Code marketplace
     │   ├── index.js                      # COMMITTED bundle (~14 MB)
     │   └── embeddings.json               # COMMITTED embeddings (~24 MB)
     └── src/
-        ├── index.ts                      # MCP server entry (stdio) — registers all 7 tools
+        ├── index.ts                      # MCP server entry (stdio) — registers all 24 tools
         ├── log.ts                        # stderr-only structured logger
         ├── types.ts                      # PolicyEntry, PolicyDocument, PolicyIndex, HealthState
         ├── cache.ts                      # TTLCache<T> (mem + opt-in disk)
@@ -91,15 +96,42 @@ msstate-mcp/                              # repo root = Claude Code marketplace
             └── health_check.ts
 ```
 
-### Tools (5)
+### Tools (24)
 
 | Tool | Purpose |
 |---|---|
+| **Policies (4)** | |
 | `search_policies` | Keyword search over the index. |
 | `get_policy` | Fetch one policy in full by number (`91.100`) or URL. |
 | `chain_find_relevant_policies` | One call: hybrid retrieval + fetch top-`k` bodies. The right tool for natural-language questions. |
 | `cite_policy` | Format a citation string. |
-| `health_check` | Inspect scraper state — index row count, cache hit rate, last error. |
+| **Calendars (2, v0.4.0+)** | |
+| `find_msu_date` | Natural-language date lookup across 6 calendars (BM25 + build-time synonyms). |
+| `get_msu_calendar` | Raw dump of one calendar source with optional term filter. |
+| **Courses (3, v0.6.0+)** | |
+| `search_msu_courses` | Fuzzy BM25 search by code, title, or description. |
+| `get_msu_course` | One course's full record — title, hours, prereqs (structured + `prereq_summary` + `parse_warnings`), cross-listings, source URL. |
+| `get_msu_course_graph` | Walk the prereq DAG forward (`prereqs`) or reverse (`unlocks`). Cycle detection, partial results on truncation. |
+| **Emergency (4, v0.7.0)** | |
+| `get_msu_emergency_guideline` | Slug / alias / free-text fuzzy lookup. Body verbatim + 911 reminder + quick contacts. |
+| `list_msu_emergency_types` | Enumerate the 12 published emergency-guideline types. |
+| `find_msu_severe_weather_refuge` | Severe-weather-only refuge area by building name. Interior-room fallback when not listed. |
+| `get_msu_emergency_contacts` | 911 / MSU PD / Counseling / off-campus contacts. Filter by category. |
+| **Tuition (4, v0.8.0)** | |
+| `get_msu_tuition_rate` | Structured rate lookup by campus + level + residency + (optional) term + credit_hours. |
+| `get_msu_enrollment_fees` | Per-college / per-program / per-course fees with substring filter. |
+| `find_msu_tuition_faq` | BM25 search across MSU's 14-question tuition FAQ. |
+| `list_msu_tuition_campuses` | Enumerate the 5 published tuition campuses. |
+| **Online (4, v1.0.0)** | |
+| `list_online_programs` | Browse/filter MSU's online programs by degree level and subject keyword. |
+| `get_online_program` | One program's full record (contacts, deadlines, tuition) by slug or fuzzy name. |
+| `get_online_admissions_process` | Admissions process sectioned by student type (UG/Grad/Transfer/Readmit/International). |
+| `find_online_info` | BM25 over support pages + central staff directory. |
+| **Dining (2, v1.1.0)** | |
+| `list_msu_dining_locations` | Browse/filter dining venues; open-now filter; substring match. |
+| `get_msu_dining_hours` | Full per-venue hours + status_now (slug or fuzzy name). |
+| **Diagnostic (1)** | |
+| `health_check` | Inspect scraper state — index row count, per-source counts, cache hit rate, last error. |
 
 ### Bundling and dist/
 

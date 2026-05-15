@@ -16,7 +16,7 @@ Covers five domains, all sourced exclusively from `*.msstate.edu`:
 | **Online programs** | ~126 program pages + admissions + staff + 5 support pages | `online.msstate.edu` |
 | **Dining** | ~24 venues + per-day hours | `dining.msstate.edu` -> `msstatedining.mydininghub.com` |
 
-**24 MCP tools.** Current version: **v0.9.0**. The hosted Worker ships server-side routing instructions over MCP — ChatGPT and Claude both pick the right tool without per-session prompting.
+**24 MCP tools.** Current version: **v1.1.0**. The hosted Worker ships server-side routing instructions over MCP — ChatGPT and Claude both pick the right tool without per-session prompting.
 
 ---
 
