@@ -1,33 +1,26 @@
 # msstate-mcp
 
-**Ask Claude or ChatGPT about Mississippi State University. Get answers grounded in MSU's own pages and PDFs — with verbatim quotes and clickable citations.**
+**Ask Claude or ChatGPT about Mississippi State University. Get answers grounded in MSU's own pages and PDFs — with verbatim quotes and clickable citations back to msstate.edu.**
 
-> ⚠️ **Unofficial.** Not affiliated with, endorsed by, or sponsored by Mississippi State University. Always verify against the official source before acting on any answer.
+> ⚠️ **Unofficial.** Not affiliated with, endorsed by, or sponsored by Mississippi State University. Every answer must be verified against the official MSU source before you act on it — see [Always double-check](#always-double-check) for why.
 
-Covers five domains, all sourced exclusively from `*.msstate.edu`:
+**24 MCP tools across 7 MSU content domains.** Current version: **v1.1.0** (2026-05-14). The hosted Cloudflare Worker ships routing instructions over MCP — Claude and ChatGPT both pick the right tool without per-session prompting.
 
 | Domain | Coverage | Source |
 |---|---|---|
-| **Operating Policies** | 217 current OPs | `policies.msstate.edu/current` |
-| **Academic dates & deadlines** | 907 rows × 6 calendars | `registrar` / `hrm` / `grad` / `sfa` / `housing` |
+| **Operating Policies** | 217 current OPs (PDFs + landing pages) | `policies.msstate.edu/current` |
+| **Academic dates & deadlines** | 914 rows × 6 calendars | `registrar` / `hrm` / `grad` / `sfa` / `housing` |
 | **Course catalog** | 3,737 undergrad + grad courses with prereq DAG | `catalog.msstate.edu` |
-| **Emergency guidance** | 12 guidelines + refuge areas + contacts | `emergency.msstate.edu` |
+| **Emergency guidance** | 12 guidelines + 6 refuge-area sets + 12 contacts | `emergency.msstate.edu` |
 | **Tuition & fees** | 74 rate rows × 5 campuses + 23 fees + 14 FAQs | `controller.msstate.edu` + `vetmed.msstate.edu` |
-| **Online programs** | ~126 program pages + admissions + staff + 5 support pages | `online.msstate.edu` |
-| **Dining** | ~24 venues + per-day hours | `dining.msstate.edu` -> `msstatedining.mydininghub.com` |
-
-**24 MCP tools.** Current version: **v1.1.0**. The hosted Worker ships server-side routing instructions over MCP — ChatGPT and Claude both pick the right tool without per-session prompting.
+| **Online programs** | 114 programs + admissions + 23 staff + 5 support pages | `online.msstate.edu` |
+| **Dining** | 24 venues + per-day hours + live open-now status | `dining.msstate.edu` → `msstatedining.mydininghub.com` |
 
 ---
 
 ## What you can ask
 
-**Tuition** (v0.8.0)
-- *"How much is in-state undergrad tuition at Starkville for Fall 2026 with 15 credit hours?"*
-- *"What's the College of Engineering fee?"*
-- *"What's vetmed DVM tuition for a Mississippi resident?"*
-
-**Policies**
+**Operating policies**
 - *"What is MSU's hazing policy?"*
 - *"What sanctions apply to alcohol offenses for MSU students?"*
 - *"What's the grade-appeal process?"*
@@ -36,31 +29,85 @@ Covers five domains, all sourced exclusively from `*.msstate.edu`:
 - *"What are the staff holidays for the rest of 2026?"*
 - *"When does spring break start?"*
 - *"When are finals in fall 2026?"*
+- *"Grad student — when does Spring 2027 actually begin?"*
 
-**Courses**
-- *"What's MSU's networking course?"* → finds CSE 4153
+**Course catalog**
+- *"What's MSU's networking course?"* → finds CSE 4153 by description
 - *"What do I need to take before CSE 4733?"* → walks the prereq chain
 - *"What does Calc I unlock?"* → reverse-walks the DAG
 
-**Emergency** (v0.7.0)
+**Emergency guidance**
 - *"Severe weather refuge for McCool Hall?"*
 - *"What do I do during a tornado on campus?"*
 - *"What's the number for MSU PD?"*
 
-**Online programs** (v1.0.0)
+**Tuition & fees**
+- *"How much is in-state undergrad tuition at Starkville for Fall 2026 with 15 credit hours?"*
+- *"What's the College of Engineering fee?"*
+- *"What's vetmed DVM tuition for a Mississippi resident?"*
+
+**Online programs**
 - *"Does MSU have an online MBA?"*
 - *"How do I apply to MSU online as an international student?"*
 - *"Who's the advisor for the online psychology program?"*
 - *"What's the application deadline for the online MS in Cybersecurity?"*
 - *"Does MSU online operate in my state?"*
 
-**Dining** (v1.1.0)
+**Dining**
 - *"Is Perry open right now?"*
 - *"What time does Chick-fil-A close?"*
 - *"Where can I get coffee at 9pm?"*
 - *"List all open dining halls."*
 
-The model **refuses** when no MSU source covers the question (*"What's the weather?"*, *"Football scores?"*) rather than guessing.
+The model is told to **refuse** when no MSU source covers the question (*"What's the weather?"*, *"Football scores?"*) instead of guessing from training data.
+
+---
+
+## How it works
+
+```
+       you ask                                                MSU's site
+          ↓                                                       ↑
+   ┌──────────────┐    tool call    ┌─────────────────┐    HTTP    │
+   │ Claude /     │ ──────────────► │   msstate-mcp   │ ───────────┘
+   │ ChatGPT /    │                 │ (Worker or npm) │
+   │ Cursor / …   │ ◄────────────── │                 │
+   └──────────────┘   tool result   └─────────────────┘
+                     {data + URL}      pre-baked corpus
+                                       OR live scrape
+```
+
+1. **Your question goes to your LLM client** (Claude, ChatGPT, Cursor, Claude Desktop, etc.).
+2. **The MCP server hands the client a routing playbook** during the `initialize` handshake (since v0.8.0). 7 rules map question shapes → the right tool. ChatGPT used to guess blind from tool descriptions; the routing playbook fixed that.
+3. **The matched tool returns structured MSU data** — verbatim text, dates, course records, hours — plus the canonical `msstate.edu` URL it came from.
+4. **The model answers grounded in that data**, with the URL surfaced in its reply so you can click through to MSU directly.
+
+**Two deployment surfaces, one bundle:**
+
+- **Hosted Cloudflare Worker** (`https://msstate-policies-mcp.mminsub90.workers.dev/mcp`) — what claude.ai and ChatGPT custom connectors talk to. Reads a baked snapshot of all 7 domains, refreshed daily (dining) or quarterly (everything else).
+- **Local stdio** (npm / Claude Code plugin) — runs on your machine via `npx`. Policies are live-scraped on demand; the other six domains read the same baked snapshot the Worker uses.
+
+The corpus rule is load-bearing: **every fact the server returns must trace back to an HTTP fetch of an MSU-authoritative URL** — `policies.msstate.edu`, the six calendar pages, `catalog.msstate.edu`, `emergency.msstate.edu`, the tuition pages on `controller.msstate.edu` + `vetmed.msstate.edu`, `online.msstate.edu`, or `msstatedining.mydininghub.com` (the Compass Group platform that `dining.msstate.edu` officially 200-redirects to). No training data, no third-party mirrors, no web search. See [`CLAUDE.md`](CLAUDE.md) for the full rule.
+
+---
+
+## Always double-check
+
+This server is built to **reduce** the chance of wrong answers — verbatim quoting, citation URLs in every response, refusal when no MSU source matches. It cannot **eliminate** wrong answers. Always click the citation before acting on:
+
+- Anything money-shaped: tuition, fees, payment deadlines, financial aid.
+- Anything time-shaped: registration windows, exam dates, application deadlines, dining hours during commencement / breaks / summer.
+- Anything safety-shaped: emergency procedures, refuge locations. **Life-threatening situations: call 911 (or MSU PD at 662-325-2121) — not this server.**
+- Anything compliance-shaped: academic policies, Title IX, FERPA, Greek-life conduct rules.
+
+**Why you still need to verify:**
+
+- **Corpus snapshots can be stale.** The Worker's non-dining corpus rebuilds quarterly (next: 2026-08-01); the dining block rebuilds daily. MSU can update a page between rebuilds. Every response includes a `corpus_built_at` timestamp — if it's old and the topic moves fast (tuition rates, deadlines), distrust it.
+- **LLMs can mis-quote even from correct data.** Tool responses include verbatim source text; the model occasionally paraphrases anyway. The citation URL gives you ground truth.
+- **MSU can change a page.** A typo, a re-organization, a policy revision — the scraper might capture mid-flight state. Build-time guards reject obviously broken corpus snapshots, but subtler drift can slip through.
+- **This project is unofficial.** Final authority is whatever `msstate.edu` says today, not what the snapshot said yesterday.
+
+If you find a wrong answer, file an issue with the transcript at <https://github.com/3uLLd0gs/msstate-mcp/issues>.
 
 ---
 
@@ -96,7 +143,7 @@ Same flow as claude.ai. Free-tier ChatGPT can't add connectors — use the [Open
 3. **Name:** `MSU` &nbsp;&nbsp; **URL:** `https://msstate-policies-mcp.mminsub90.workers.dev/mcp`
 4. Save → 24 tools available
 
-ChatGPT routing used to be hit-or-miss before v0.8.0 because there was no way to inject a system prompt through the connector. The server now provides routing rules via MCP's `InitializeResult.instructions` field, so GPT picks the right tool out of the box.
+ChatGPT routing used to be hit-or-miss because there was no way to inject a system prompt through the connector. Since v0.8.0 the server provides routing rules via MCP's `InitializeResult.instructions` field, so GPT picks the right tool out of the box.
 
 ### Claude Code
 
@@ -178,7 +225,7 @@ If you want to override or extend the server's routing rules, pass your own `ins
 
 ### Free claude.ai
 
-Free claude.ai can't add MCP connectors, so use a curated **starter zip** of 22 high-traffic policy PDFs with a system-prompt template. Policies only (calendars + courses + tuition change too often for a static drop).
+Free claude.ai can't add MCP connectors, so use a curated **starter zip** of 22 high-traffic policy PDFs with a system-prompt template. Policies only (calendars + courses + tuition + dining change too often for a static drop).
 
 1. Download `msstate-policies-starter.zip` from the [latest release](https://github.com/3uLLd0gs/msstate-mcp/releases/latest)
 2. Sign in at <https://claude.ai>, create a **Project**
@@ -192,43 +239,43 @@ Free claude.ai can't add MCP connectors, so use a curated **starter zip** of 22 
 | Tool | Use it for |
 |---|---|
 | **Policies (4)** | |
-| `chain_find_relevant_policies` | One-call workflow: question → top-k policies → grounded answer |
-| `search_policies` | Keyword search, returns OP numbers + snippets |
-| `get_policy` | Full text of one OP by number or URL |
-| `cite_policy` | Format a short or full citation |
+| `chain_find_relevant_policies` | One-call workflow: question → top-k policies → grounded answer with citation |
+| `search_policies` | Keyword search; returns OP numbers + snippets |
+| `get_policy` | Full text of one OP by number (`91.100`) or URL |
+| `cite_policy` | Format a short or full citation string |
 | **Calendars (2)** | |
-| `find_msu_date` | Natural-language date lookup across 6 calendars (BM25 + LLM-paraphrased synonyms baked at build time — no runtime API) |
+| `find_msu_date` | Natural-language date lookup across 6 calendars. BM25 + LLM-paraphrased synonyms baked at build time — no runtime API. Smart fallback for term-specific queries when grad/financial-aid calendars haven't published yet. |
 | `get_msu_calendar` | Raw dump of one calendar source with optional term filter |
 | **Courses (3)** | |
 | `search_msu_courses` | Fuzzy search by code, title, or description (BM25 with code×4 / title×3 / description×1) |
 | `get_msu_course` | One course's full record — title, hours, prereqs (structured + `prereq_summary` one-liner + `parse_warnings` diagnostic array), cross-listings, source URL |
 | `get_msu_course_graph` | Walk the prereq DAG forward (`prereqs`) or reverse (`unlocks`). Depth 1–10, cycle detection, partial results when truncated |
-| **Emergency (4, v0.7.0)** | |
-| `get_msu_emergency_guideline` | Emergency-guidance lookup (tornado, fire, active shooter, …). Slug / alias / free-text fuzzy. Body verbatim + 911 reminder + quick contacts |
+| **Emergency (4)** | |
+| `get_msu_emergency_guideline` | Slug / alias / free-text fuzzy lookup. Body verbatim + 911 reminder + quick contacts. *Every response leads with the 911 reminder on every code path.* |
 | `list_msu_emergency_types` | Enumerate the 12 published emergency-guideline types |
-| `find_msu_severe_weather_refuge` | Severe-weather-only refuge area by building name. Returns interior-room fallback guidance when the building isn't listed |
+| `find_msu_severe_weather_refuge` | Severe-weather refuge area by building name. Returns interior-room fallback guidance when the building isn't on the list |
 | `get_msu_emergency_contacts` | 911 / MSU PD / Counseling / off-campus contacts. Filter by `all` \| `emergency` \| `campus` \| `off_campus` |
-| **Tuition (4, v0.8.0)** | |
-| `get_msu_tuition_rate` | Structured rate lookup by campus + level + residency + (optional) term + credit_hours. Returns line-item breakdown, effective_term, mandatory "rates subject to change" disclaimer. Routing rules: vetmed=DVM-only; mgccc=undergrad-only |
+| **Tuition (4)** | |
+| `get_msu_tuition_rate` | Structured rate lookup by campus + level + residency + (optional) term + credit_hours. Line-item breakdown, `effective_term` verbatim, mandatory "rates subject to change" disclaimer. Routing: vetmed = DVM-only; mgccc = undergrad-only. |
 | `get_msu_enrollment_fees` | Per-college / per-program / per-course fees with substring filter (e.g. "engineering", "honors", "business administration") |
 | `find_msu_tuition_faq` | BM25 search across MSU's 14-question tuition FAQ. Top-k Q&A pairs verbatim with anchor URLs |
-| `list_msu_tuition_campuses` | Enumerate the 5 published tuition campuses with levels_offered + rate_basis + source URL |
-| **Online (4, v1.0.0)** | |
-| `list_online_programs` | Browse/filter MSU's online programs by degree level and subject keyword |
-| `get_online_program` | Fetch one program's full record (contacts, deadlines, tuition) by slug or fuzzy name |
-| `get_online_admissions_process` | Return admissions process sectioned by student type (UG/Grad/Transfer/Readmit/International) |
-| `find_online_info` | BM25 search over support pages (state auth, military, orientation, FAQ, financial) + central staff directory |
-| **Dining (2, v1.1.0)** | |
-| `list_msu_dining_locations` | Browse/filter dining venues; open-now filter; substring match |
-| `get_msu_dining_hours` | Full per-venue hours + status_now (slug or fuzzy name) |
+| `list_msu_tuition_campuses` | Enumerate the 5 published tuition campuses with `levels_offered` + `rate_basis` + source URL |
+| **Online (4)** | |
+| `list_online_programs` | Browse/filter MSU's 114 online programs by degree level and subject keyword |
+| `get_online_program` | One program's full record (contacts, deadlines, tuition, accreditation, forms) by slug or fuzzy name |
+| `get_online_admissions_process` | Admissions process sectioned by student type (UG / Grad / Transfer / Readmit / International) + central front-desk contact + application-fee tiers |
+| `find_online_info` | BM25 search over 5 support pages (state authorization, military assistance, orientation, FAQ, financial matters) + central staff directory |
+| **Dining (2)** | |
+| `list_msu_dining_locations` | Browse/filter dining venues; open-now filter; substring match. Returns 24 venues with today's hours. |
+| `get_msu_dining_hours` | Full per-venue hours (all 7 days) + `status_now` (open / closed / unknown) computed in America/Chicago. Slug or fuzzy name. |
 | **Diagnostic (1)** | |
-| `health_check` | Per-source counts, last build timestamp, last errors |
+| `health_check` | Per-source counts, last-build timestamp, last errors |
 
 ---
 
 ## Sample responses
 
-### Tuition question (v0.8.0)
+### Tuition question
 
 *"How much is in-state undergrad tuition at Starkville for Fall 2026 with 15 credit hours?"*
 
@@ -243,29 +290,18 @@ Free claude.ai can't add MCP connectors, so use a curated **starter zip** of 22 
 >
 > **Source:** [Starkville Campus rates](https://www.controller.msstate.edu/accountservices/tuition/starkville-campus) (snapshot built 2026-05-13).
 
-### Date question
+### Dining question
 
-*"What are the staff holidays for the rest of 2026?"*
+*"Where can I get coffee right now?"*
 
-> MSU university holidays for the rest of 2026 (from <https://www.hrm.msstate.edu/benefits/holidays/>):
+> Right now (Friday afternoon, America/Chicago), these MSU dining venues are open:
 >
-> - **Memorial Day:** 2026-05-25
-> - **Independence Day (observed):** 2026-07-03
-> - **Labor Day:** 2026-09-07
-> - **Thanksgiving:** 2026-11-26 to 2026-11-27
-> - **Winter Break:** 2026-12-23 to 2027-01-02
+> - **Arepas on Campus** — 8:00 AM – 4:30 PM (commencement hours)
+> - **Chick-fil-A** — open
 >
-> *Each date is quoted verbatim from the MSU HR holiday schedule (snapshot built 2026-05-13).*
-
-### Policy question
-
-*"What is MSU's hazing policy?"*
-
-> MSU's hazing policy, **OP 91.208**, prohibits hazing across all university-affiliated organizations:
+> Most other venues are on summer / commencement schedules and currently closed. For a complete list with today's hours, see the full dining page.
 >
-> *"Hazing is prohibited. Any organization, student, or other person affiliated with the university found to have engaged in hazing as defined in this policy is subject to disciplinary action under the Student Code of Conduct and other applicable university policies."* (OP 91.208)
->
-> **Source:** OP 91.208 at <https://www.policies.msstate.edu/policy/91208> (retrieved 2026-05-12).
+> **Source:** [MSU Dining](https://msstatedining.mydininghub.com/en/sitemap) (corpus refreshed 2026-05-15).
 
 ### Course question
 
@@ -280,7 +316,7 @@ Free claude.ai can't add MCP connectors, so use a curated **starter zip** of 22 
 >
 > **Source:** [CSE 4733](https://catalog.msstate.edu/search/?P=CSE%204733) (catalog scraped 2026-05-13).
 
-### Emergency question (v0.7.0)
+### Emergency question
 
 *"What do I do if there's a tornado warning on campus?"*
 
@@ -294,19 +330,30 @@ Free claude.ai can't add MCP connectors, so use a curated **starter zip** of 22 
 >
 > **Source:** [Severe Weather / Tornado](https://www.emergency.msstate.edu/guidelines/severe-weather-tornado/) (snapshot built 2026-05-13).
 
+### Policy question
+
+*"What is MSU's hazing policy?"*
+
+> MSU's hazing policy, **OP 91.208**, prohibits hazing across all university-affiliated organizations:
+>
+> *"Hazing is prohibited. Any organization, student, or other person affiliated with the university found to have engaged in hazing as defined in this policy is subject to disciplinary action under the Student Code of Conduct and other applicable university policies."* (OP 91.208)
+>
+> **Source:** OP 91.208 at <https://www.policies.msstate.edu/policy/91208> (retrieved 2026-05-12).
+
 ---
 
 ## What this WON'T do (limitations)
 
-**0. Substitute for emergency services.** This server returns MSU's *published* emergency guidance verbatim. It is not real-time alerts, not a dispatcher, not triage, not counseling. **If you are in a life-threatening emergency, stop reading and call 911 (or MSU PD at 662-325-2121).** Every emergency-tool response carries this same reminder.
+**0. Substitute for emergency services.** This server returns MSU's *published* emergency guidance verbatim. It is not real-time alerts, not a dispatcher, not triage, not counseling. **If you are in a life-threatening emergency, stop reading and call 911 (or MSU PD at 662-325-2121).** Every emergency-tool response leads with that reminder.
 
-**1. Snapshots, not live data.** The hosted Cloudflare Worker reads a pre-built corpus rebuilt on each release. Responses include a `corpus_built_at` field so the model can flag staleness. For *always-live* (fetch-on-request) policy text, use a local install — the npm/plugin path live-scrapes `policies.msstate.edu`.
+**1. Snapshots, not live data.** The hosted Worker reads a pre-built corpus, rebuilt daily for dining and quarterly for everything else. Responses include a `corpus_built_at` field so the model can flag staleness. For *always-live* (fetch-on-request) policy text, use a local install — the npm/plugin path live-scrapes `policies.msstate.edu`.
 
 **2. No coverage of:**
+
 - Real-time enrollment / billing / registration / financial-aid award status (that's MSU's Banner system; out of scope)
 - Specific course offerings (which semester, which professor, seats available)
 - Archived catalog editions (current undergrad + grad only)
-- Anything outside the 5 listed domains' canonical pages
+- Anything outside the 7 listed domains' canonical pages
 
 **3. LLM behavior is the model's responsibility.** The tools return grounded data with citations. The server provides routing + anti-hallucination instructions via MCP, but final enforcement lives in the model. If you see a paraphrased policy or a fabricated citation, that's a model failure, not a corpus failure — report it as an issue with the transcript.
 
@@ -316,18 +363,20 @@ Free claude.ai can't add MCP connectors, so use a curated **starter zip** of 22 
 
 **6. Tuition rates are time-sensitive.** Rates are baked at corpus-rebuild time. Vetmed publishes one academic year behind controller — `effective_term` is surfaced verbatim on every response so the model can flag staleness.
 
-**7. Unofficial.** Always verify with the official MSU source before acting. Read [SECURITY.md § "Out of scope: client-side circumvention"](SECURITY.md) for the abuse classes this server explicitly does not defend against.
+**7. Dining hours are a snapshot too.** Refreshed daily at 09:00 UTC, but if MSU changes a venue's hours mid-day (special event, weather closure), the corpus won't reflect it until the next refresh. The `status_now` field is computed against the snapshot, not live.
+
+**8. Unofficial.** Always verify with the official MSU source before acting. Read [SECURITY.md § "Out of scope: client-side circumvention"](SECURITY.md) for the abuse classes this server explicitly does not defend against.
 
 ---
 
-## Server-side routing (new in v0.8.0)
+## Server-side routing
 
-The MCP server returns a `InitializeResult.instructions` string on every `initialize` handshake. Spec-compliant clients (Claude.ai, ChatGPT custom connector, Cursor, Windsurf, Zed) prepend this to the model's system context. It includes:
+The MCP server returns an `InitializeResult.instructions` string on every `initialize` handshake. Spec-compliant clients (claude.ai, ChatGPT custom connector, Cursor, Windsurf, Zed) prepend this to the model's system context. It includes:
 
-- **Routing rules** — which tool to call for each question category (policies / dates / courses / emergency / tuition / online / dining). 7 rules total; the 6th maps online-program, admissions, and student-services questions to the 4 online tools; the 7th maps dining, hours, and open-now questions to the 2 dining tools.
-- **Anti-hallucination rules** — use only tool data, quote verbatim, refuse outside-corpus questions, try alternative tools before falling back to general knowledge
+- **7 routing rules** — one per domain. Each maps question shapes (e.g. "when is…", "how much is…", "what's the prereq for…") to the right tool, plus distinguishes domains that overlap (online-program admissions vs. general policies; tuition tools vs. financial aid policy).
+- **Anti-hallucination rules** — use only tool data, quote verbatim, refuse outside-corpus questions, try alternative tools before falling back to general knowledge.
 
-Before v0.8.0, ChatGPT's custom connector flow routed blind from tool descriptions alone — it would sometimes pick a policy tool for a date question and then fall back to training data when the wrong tool returned nothing useful. Adding server-side instructions fixed this without requiring users to inject their own system prompt.
+Before this existed, ChatGPT's custom connector flow routed blind from tool descriptions alone — it would sometimes pick a policy tool for a date question and then fall back to training data when the wrong tool returned nothing useful. Adding server-side instructions fixed it without requiring users to inject their own system prompt.
 
 You can inspect the live string with:
 
@@ -342,11 +391,11 @@ curl -s -X POST https://msstate-policies-mcp.mminsub90.workers.dev/mcp \
 
 ## Privacy & data flow
 
-- **Local install** (Claude Code / Desktop / Cursor / Windsurf / Zed via npx): truly local. The MCP server runs on your machine. Outbound traffic only to `*.msstate.edu` to fetch policy PDFs. No analytics, no telemetry, no third-party APIs.
+- **Local install** (Claude Code / Desktop / Cursor / Windsurf / Zed via `npx`): truly local. The MCP server runs on your machine. Outbound traffic only to `*.msstate.edu` (and `msstatedining.mydininghub.com` for dining) to fetch the corpus. No analytics, no telemetry, no third-party APIs.
 - **Hosted Worker** (claude.ai + ChatGPT connectors): your query goes to Anthropic/OpenAI and to the Cloudflare Worker. The Worker reads its baked snapshot — never forwards your query elsewhere. No logs beyond Cloudflare's standard request metadata.
 - **OpenAI API**: same as ChatGPT — query goes to OpenAI + Worker only.
 
-If you opt in to semantic policy retrieval (`MSSTATE_POLICIES_RETRIEVAL=embed` or `=hybrid`), your query is sent to OpenAI for embedding. The default `bm25` mode does not require this. **Calendar, course, emergency, and tuition retrieval are always BM25 — no runtime API.**
+If you opt in to semantic policy retrieval (`MSSTATE_POLICIES_RETRIEVAL=embed` or `=hybrid`), your query is sent to OpenAI for embedding. The default `bm25` mode does not require this. **Calendar, course, emergency, tuition, online, and dining retrieval are always BM25 at runtime — no third-party API calls.**
 
 ---
 
@@ -360,7 +409,7 @@ Most users set nothing. Local installs can tune:
 | `OPENAI_API_KEY` | unset | Only needed if you change the retrieval mode above |
 | `MSSTATE_POLICIES_CACHE` | unset | Set to `disk` to cache policy PDFs across restarts |
 
-Self-hosters rebuilding the corpus additionally need `ANTHROPIC_API_KEY` for the v0.5.0 build-time calendar-synonym step. **Never read at runtime.**
+Self-hosters rebuilding the corpus additionally need `ANTHROPIC_API_KEY` for the build-time calendar-synonym generation step (Claude Haiku, ~$0.50 per full rebuild). **Never read at runtime** — mechanically enforced by the security checklist.
 
 ---
 
@@ -370,11 +419,11 @@ Self-hosters rebuilding the corpus additionally need `ANTHROPIC_API_KEY` for the
 |---|---|---|
 | Policies | 50 hand-written questions, Claude Sonnet judge, k=5 | 86 / 88 composite |
 | Calendar synonyms | 30 ground-truth queries (semantic-gap, BM25-favorable, smart-fallback buckets) | +13.3pp lift on semantic-gap, 0pp regression elsewhere |
-| Courses | 70 catalog-grounded questions across 4 buckets (incl. parse_warnings + prereq_summary) | 100% / 100% / 100% / 100% |
+| Courses | 52 catalog-grounded questions across 3 buckets (course_explain / prereq_chain / unlocks) | 100% / 100% / 100% |
 | Emergency | 25 questions (guideline / alias / refuge / contacts / refusal) | 24 / 25 |
 | Tuition | 32 questions (rate lookup / not-found routing / fees / FAQ / adversarial) | 32 / 32 |
-| Online | 30-question eval (program lookup / list / admissions / info / adversarial) | 30/30 (100% on 2026-05-13 build) |
-| Dining | 15-question eval (slug / name_query / list / open-status / adversarial) | 15/15 (100% on 2026-05-14 build) |
+| Online | 30 questions (program lookup / list / admissions / info / adversarial) | 30 / 30 (2026-05-13 build) |
+| Dining | 15 questions (slug / name_query / list / open-status / adversarial) | 15 / 15 (2026-05-14 build) |
 
 Run locally:
 
@@ -384,6 +433,8 @@ npm run eval:synonyms                                         # calendar synonym
 node ../scripts/run-eval.mjs --suite=courses                  # courses
 node ../scripts/run-eval.mjs --suite=emergency                # emergency
 node ../scripts/run-eval.mjs --suite=tuition                  # tuition
+node ../scripts/run-eval.mjs --suite=online                   # online
+node ../scripts/run-eval.mjs --suite=dining                   # dining
 ```
 
 Full eval artifacts in [`msstate-policies/eval/`](msstate-policies/eval/).
@@ -396,7 +447,8 @@ Full eval artifacts in [`msstate-policies/eval/`](msstate-policies/eval/).
 - **ChatGPT picked the wrong tool** — was the connector added before v0.8.0? Some clients cache the tool list; refresh the connector or start a new chat to pick up the server's routing instructions.
 - **Course not found** — `get_msu_course` returns `{found: false, suggestions: [...]}` with the top 3 BM25 matches. The catalog scrape has ~95%+ parse success — a small minority of pages don't yield structured records.
 - **Connector won't connect** — URL must be exactly `https://msstate-policies-mcp.mminsub90.workers.dev/mcp` (note the `/mcp`). Hit the bare URL in a browser; you should see a JSON info page.
-- **Stale answers** — check `corpus_built_at` in the response. The hosted Worker rebuilds on each release. For always-live policy text, use the local npm/plugin path.
+- **Stale answers** — check `corpus_built_at` in the response. Dining refreshes daily; everything else refreshes quarterly. For always-live policy text, use the local npm/plugin path.
+- **Dining shows "closed" when a place is open (or vice versa)** — `status_now` is computed against the snapshot, not live MSU. If MSU updated hours after 09:00 UTC, the next daily refresh will pick it up. Always confirm at the venue or on dining.msstate.edu before driving there.
 
 ---
 
@@ -417,4 +469,4 @@ MIT. See [LICENSE](LICENSE).
 
 ---
 
-*Unofficial. Always verify against the official MSU source before acting on any answer.*
+*Unofficial. Not affiliated with, endorsed by, or sponsored by Mississippi State University. Always verify against the official MSU source before acting on any answer.*
