@@ -132,7 +132,37 @@ export interface OnlineCorpus {
   admissions_process: OnlineAdmissionsProcess;
   staff: OnlineStaffEntry[];
   info_pages: OnlineInfoPage[];
+  staff_to_programs: StaffToProgramsIndex;
 }
+
+/**
+ * Reference to a program from a staff member's perspective.
+ * `role_in_program` is the contact-card role label from the program page
+ * (e.g., "General Program Questions, Admissions Process & Requirements").
+ */
+export interface ProgramRef {
+  slug: string;
+  name: string;
+  role_in_program: string;
+}
+
+/**
+ * One staff member with their full program portfolio.
+ * `display_name` is the canonical form (longest spelling wins on dedup).
+ * `role` is the department title from the staff directory when known.
+ */
+export interface StaffEntry {
+  display_name: string;
+  email: string | null;
+  role: string;
+  programs: ProgramRef[];
+}
+
+/**
+ * Flat array of staff with their programs. Built at scrape time from
+ * OnlineProgram.contacts[]. Used by list_programs_by_staff.
+ */
+export type StaffToProgramsIndex = StaffEntry[];
 
 export class OnlineWafError extends Error {
   constructor(public readonly url: string) {
