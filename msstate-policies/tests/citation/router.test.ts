@@ -1,8 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { splitClaims, routeClaim } from "../../src/citation/router.js";
+import { splitClaims, routeClaim, searchInDomain } from "../../src/citation/router.js";
 import { MAX_CLAIMS } from "../../src/citation/types.js";
-import { searchInDomain } from "../../src/citation/router.js";
 import { setOnlineCorpus } from "../../src/online/corpus.js";
 import type { OnlineCorpus, OnlineInfoPage } from "../../src/online/types.js";
 
@@ -112,5 +111,14 @@ describe("searchInDomain", () => {
     // context. The integration test (Task 5) will exercise the full path.
     assert.ok(["none", "low", "medium", "high"].includes(card.confidence));
     assert.equal(card.domain, "calendar");
+  });
+  test("calendar: miss path returns null source_url with domain='calendar'", async () => {
+    // Without seeding a calendar corpus and using a query that cannot match
+    // any indexed row, searchCalendarDomain must funnel through none(...).
+    const card = await searchInDomain("zzz-absolutely-not-a-real-calendar-claim-token-xqz", "calendar");
+    assert.equal(card.domain, "calendar");
+    assert.equal(card.source_url, null);
+    assert.equal(card.source_title, null);
+    assert.equal(card.confidence, "none");
   });
 });

@@ -1,11 +1,11 @@
 /**
  * Claim router for citation_card.
  *
- * - splitClaims: text → sentence-level claim strings.
- * - routeClaim: claim + optional hints → CitationDomain | null.
+ * - splitClaims: text → sentence-level claim strings. (Pure.)
+ * - routeClaim: claim + optional hints → CitationDomain | null. (Pure.)
  * - searchInDomain: claim + domain → CitationCard (per-corpus delegation).
- *
- * No I/O — relies on already-loaded corpora via existing per-corpus accessors.
+ *   Mostly reads from already-loaded corpora; the `policies` branch may do
+ *   live HTTP + PDF parse via getPolicy(...) on a cache miss.
  */
 import {
   type CitationDomain,
