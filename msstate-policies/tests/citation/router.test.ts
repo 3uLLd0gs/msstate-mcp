@@ -34,3 +34,37 @@ describe("splitClaims", () => {
     assert.ok(r[1].length <= 800);
   });
 });
+
+import { routeClaim } from "../../src/citation/router.js";
+
+describe("routeClaim", () => {
+  test("policy-shaped claim → policies", () => {
+    assert.equal(routeClaim("MSU OP 91.100 governs amnesty.", undefined), "policies");
+  });
+  test("date-shaped claim → calendar", () => {
+    assert.equal(routeClaim("Spring break begins March 9, 2027.", undefined), "calendar");
+  });
+  test("dollar amount + tuition → tuition", () => {
+    assert.equal(routeClaim("Resident undergraduate tuition is $5,123 per semester.", undefined), "tuition");
+  });
+  test("course code → courses", () => {
+    assert.equal(routeClaim("CSE 1284 is a prereq for CSE 2383.", undefined), "courses");
+  });
+  test("emergency keyword → emergency", () => {
+    assert.equal(routeClaim("During a tornado warning, go to the basement.", undefined), "emergency");
+  });
+  test("online program → online", () => {
+    assert.equal(routeClaim("The online MBA application deadline is August 1.", undefined), "online");
+  });
+  test("dining keyword → dining", () => {
+    assert.equal(routeClaim("Perry Cafeteria closes at 9pm on Sundays.", undefined), "dining");
+  });
+  test("empty / generic claim → null", () => {
+    assert.equal(routeClaim("This is a sentence about nothing.", undefined), null);
+  });
+  test("hint overrides heuristic on ambiguous claim", () => {
+    // "Fall registration opens August 1" could be calendar OR online.
+    // With explicit hint we trust the caller.
+    assert.equal(routeClaim("Fall registration opens August 1.", ["online"]), "online");
+  });
+});
