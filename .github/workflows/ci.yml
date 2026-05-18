@@ -54,12 +54,10 @@ jobs:
         # page-summarizing LLMs are empirically known to drop. If a corpus
         # rebuild silently regresses a load-bearing footnote, this gate fires.
         #
-        # SCOPE (CI-gated): courses, emergency, tuition, dining, adversarial
-        # — all deterministic against the baked corpus snapshots.
+        # SCOPE (CI-gated): courses, emergency, tuition, dining, online,
+        # adversarial — all deterministic against the baked corpus snapshots.
         #
         # NOT gated here (run manually before release):
-        # - 'online' — current baseline 39/45 (below the 90% threshold);
-        #   fix precision misses first, then add.
         # - 'dates' — find_msu_date live-scrapes MSU registrar/SFA/grad-school
         #   pages. CI runner IPs frequently get HTTP 403 from those hosts,
         #   making this flaky in CI. Run via
@@ -68,7 +66,7 @@ jobs:
         #   live-scrapes policies.msstate.edu.
         # - 'eval:synonyms' — manual recall check, separate harness.
         run: |
-          for suite in courses emergency tuition dining adversarial; do
+          for suite in courses emergency tuition dining online adversarial; do
             echo "::group::eval $suite"
             npm run eval -- --suite $suite
             echo "::endgroup::"

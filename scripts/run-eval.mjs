@@ -534,6 +534,15 @@ if (suite === "online") {
       else if (e.any_slug) ok = matches.some((m) => m.slug === e.any_slug);
       else if (e.any_full_body_contains) ok = matches.some((m) => (m.full_body ?? "").includes(e.any_full_body_contains));
       else if (e.matches_eq !== undefined) ok = matches.length === e.matches_eq;
+    } else if (q.kind.startsWith("staff_")) {
+      // list_programs_by_staff response: {match_count, matches:[{staff:{display_name,email,role,match_kind}, programs, program_count}], did_you_mean:[]}
+      const matches = parsed?.matches ?? [];
+      const checks = [];
+      if (e.match_count !== undefined) checks.push(parsed?.match_count === e.match_count);
+      if (e.first_match_display_name !== undefined) checks.push(matches[0]?.staff?.display_name === e.first_match_display_name);
+      if (e.programs_min !== undefined) checks.push((matches[0]?.program_count ?? 0) >= e.programs_min);
+      if (e.did_you_mean_max !== undefined) checks.push(Array.isArray(parsed?.did_you_mean) && parsed.did_you_mean.length <= e.did_you_mean_max);
+      ok = checks.length > 0 && checks.every(Boolean);
     }
     if (ok) pass++;
     else failures.push({ q, got: parsed ?? text.slice(0, 200) });
