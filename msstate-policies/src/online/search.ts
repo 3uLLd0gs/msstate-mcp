@@ -200,7 +200,21 @@ export function filterPrograms(programs: OnlineProgram[], req: ProgramFilterRequ
  * resolveProgram only (not in info-page search).
  */
 const PROGRAM_STOP_WORDS = new Set([
+  // Domain-specific (added in v1.1.1)
   "online", "program", "degree", "msu", "msstate",
+  // Common English function words (added in v1.2.1) — keeps junk queries like
+  // "program that definitely does not exist" from accumulating low-weight
+  // short_description hits and surfacing a spurious top match. Intentionally
+  // narrow: articles, prepositions, conjunctions, copulas, common
+  // determiners/auxiliaries/negations. Substantive nouns/adjectives like
+  // "new", "old", "first" are NOT stripped (they may genuinely discriminate).
+  "a", "an", "the",
+  "of", "in", "on", "at", "to", "for", "with", "from", "by",
+  "and", "or", "but",
+  "is", "are", "was", "were", "be", "been",
+  "do", "does", "did", "has", "have", "had",
+  "not", "no",
+  "this", "that", "these", "those", "it",
 ]);
 
 export type ProgramMatchStrategy = "substring" | "bm25" | "no_signal" | "no_match";

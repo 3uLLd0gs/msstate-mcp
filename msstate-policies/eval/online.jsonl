@@ -25,15 +25,6 @@
 {"kind":"info_financial","desc":"financial matters","args":{"name":"find_online_info","arguments":{"q":"financial aid billing","scope":"financial-matters"}},"expect":{"top_slug":"financial-matters"}}
 {"kind":"info_faq","desc":"FAQ scope","args":{"name":"find_online_info","arguments":{"q":"how to access canvas registration","scope":"faq"}},"expect":{"top_slug":"faq"}}
 {"kind":"info_no_match","desc":"off-topic -- rival school","args":{"name":"find_online_info","arguments":{"q":"alabama crimson tide football roster"}},"expect":{"matches_eq":0}}
-// KNOWN FAILURE — design tension: this case expects matched=null for a low-confidence
-// BM25 query, but resolveProgram() currently returns the highest-scoring program even
-// when score is driven by junk tokens hitting short_descriptions. Existing test
-// `BM25 fallback when no substring hit` (tests/online/search-program-resolver.test.ts:110)
-// asserts the OPPOSITE — that single-token queries like "accelerated" SHOULD match
-// purely via short_description. Resolving this requires a design decision: add a
-// min-score floor (would break the "accelerated" test) OR extend PROGRAM_STOP_WORDS
-// with English stop words like {that, does, not, is, are, the} (lower blast radius).
-// Until that decision, this case is allowed to fail — overall suite still > 90%.
 {"kind":"adversarial_program","desc":"non-existent program name","args":{"name":"get_online_program","arguments":{"name_query":"program that definitely does not exist xyz"}},"expect":{"matched_null":true}}
 {"kind":"adversarial_keyword","desc":"football subject keyword","args":{"name":"list_online_programs","arguments":{"subject_keyword":"football team"}},"expect":{"matches_eq":0}}
 {"kind":"adversarial_off_topic","desc":"weather query","args":{"name":"find_online_info","arguments":{"q":"weather forecast today"}},"expect":{"matches_eq":0}}

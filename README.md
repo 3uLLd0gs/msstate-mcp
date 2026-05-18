@@ -425,7 +425,7 @@ Self-hosters rebuilding the corpus additionally need `ANTHROPIC_API_KEY` for the
 | Courses | 52 catalog-grounded questions across 3 buckets (course_explain / prereq_chain / unlocks) | 100% / 100% / 100% |
 | Emergency | 25 questions (guideline / alias / refuge / contacts / refusal) | 24 / 25 |
 | Tuition | 32 questions (rate lookup / not-found routing / fees / FAQ / adversarial) | 32 / 32 |
-| Online | 45 questions (program lookup / list / admissions / info / staff / adversarial) | 44 / 45 (2026-05-18 build; 1 known design-tension failure documented inline) |
+| Online | 45 questions (program lookup / list / admissions / info / staff / adversarial) | 45 / 45 (2026-05-18 build) |
 | Dining | 15 questions (slug / name_query / list / open-status / adversarial) | 15 / 15 (2026-05-14 build) |
 | Dates (manual) | 13 ISO-date assertions across spring break / Thanksgiving / Labor Day / finals / classes-begin / graduation | 13 / 13 (2026-05-18 build) |
 | Adversarial (CI-gated) | 13 moat-defense cases across online / emergency / tuition / courses — asserts on footnotes, line items, refuge rooms, prereq min-grades that page-summarizing LLMs drop | 13 / 13 (2026-05-18 build) |
