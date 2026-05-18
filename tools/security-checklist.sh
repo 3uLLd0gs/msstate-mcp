@@ -718,4 +718,69 @@ else
   note "FAIL" "DIN6 polite-scraping policy not visible in scraper.ts" 3
 fi
 
+# =============================================================================
+# Telemetry / privacy checks (TEL1-TEL4, added 2026-05-18). +8 pts total.
+# See PRIVACY.md and worker/src/index.ts recordEvent / bucketCountry.
+# =============================================================================
+
+# TEL1: recordEvent function body must NOT call request.headers.get,
+# request.url, or read any payload. Scope: function body only (the file
+# legitimately uses headers.get("content-length") for the 413 cap elsewhere).
+# Approach: extract 20 lines after the function declaration and grep them.
+TEL1_VIOLATIONS=$(awk '/^function recordEvent\(/,/^}$/' worker/src/index.ts 2>/dev/null \
+  | grep -cE "headers\.get|request\.url|request\.body" | tr -d ' ')
+TEL1_VIOLATIONS=${TEL1_VIOLATIONS:-0}
+if [ "$TEL1_VIOLATIONS" = "0" ]; then
+  score=$((score + 2))
+  note "PASS" "TEL1 recordEvent body reads no headers/url/body" 2
+else
+  note "FAIL" "TEL1 recordEvent body has $TEL1_VIOLATIONS forbidden references" 2
+fi
+
+# TEL2: wrangler.toml declares analytics_engine_datasets binding named exactly TELEMETRY.
+if grep -qE 'binding\s*=\s*"TELEMETRY"' worker/wrangler.toml 2>/dev/null \
+  && grep -qE '\[\[analytics_engine_datasets\]\]' worker/wrangler.toml 2>/dev/null; then
+  score=$((score + 2))
+  note "PASS" "TEL2 wrangler.toml declares TELEMETRY analytics_engine_datasets binding" 2
+else
+  note "FAIL" "TEL2 wrangler.toml missing TELEMETRY analytics_engine_datasets binding" 2
+fi
+
+# TEL3: PRIVACY.md exists at repo root AND contains specific anchor strings.
+TEL3_OK=1
+if [ ! -f PRIVACY.md ]; then TEL3_OK=0; fi
+if [ "$TEL3_OK" = "1" ]; then
+  if ! grep -qF "Cloudflare Workers Analytics Engine" PRIVACY.md; then TEL3_OK=0; fi
+  if ! grep -qF "country_bucket" PRIVACY.md && ! grep -qF "country bucket" PRIVACY.md; then TEL3_OK=0; fi
+  if ! grep -qF "tool name" PRIVACY.md; then TEL3_OK=0; fi
+  if ! grep -qE "^\*\*Last updated:" PRIVACY.md; then TEL3_OK=0; fi
+fi
+if [ "$TEL3_OK" = "1" ]; then
+  score=$((score + 2))
+  note "PASS" "TEL3 PRIVACY.md present at repo root with required anchor strings" 2
+else
+  note "FAIL" "TEL3 PRIVACY.md missing or lacks anchor strings (Cloudflare Workers Analytics Engine / country bucket / tool name / Last updated)" 2
+fi
+
+# TEL4: bucketCountry function present in worker source AND mapping returns
+# only one of the documented buckets. Prevents quiet drift back to raw country.
+TEL4_OK=1
+if ! grep -qE "function bucketCountry\(" worker/src/index.ts 2>/dev/null; then
+  TEL4_OK=0
+fi
+# Verify the canonical bucket strings appear inside the function definition.
+# Pull the function body and check for each bucket label.
+if [ "$TEL4_OK" = "1" ]; then
+  BODY=$(awk '/function bucketCountry\(/,/^}$/' worker/src/index.ts)
+  for bucket in '"US"' '"NA-other"' '"EU"' '"Other"' '"??"'; do
+    if ! echo "$BODY" | grep -qF "$bucket"; then TEL4_OK=0; break; fi
+  done
+fi
+if [ "$TEL4_OK" = "1" ]; then
+  score=$((score + 2))
+  note "PASS" "TEL4 bucketCountry function present with all 5 canonical buckets" 2
+else
+  note "FAIL" "TEL4 bucketCountry missing or doesn't return one of {US, NA-other, EU, Other, ??}" 2
+fi
+
 echo "$score"

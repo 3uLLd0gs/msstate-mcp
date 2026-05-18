@@ -1689,6 +1689,10 @@ const TOOLS = [
   },
 ] as const;
 
+// Allowlist of tool names we ourselves defined. Used to guard the telemetry
+// write so that arbitrary caller-supplied strings can never reach AE.
+const KNOWN_TOOL_NAMES: ReadonlySet<string> = new Set(TOOLS.map((t) => t.name));
+
 // ---- Tool handlers ----------------------------------------------------------
 
 interface McpContent {
@@ -1719,6 +1723,59 @@ function tooLong(name: string, value: string): McpToolResponse {
   return errorContent(
     `${name} too long: ${value.length} chars (max ${MAX_QUERY_CHARS}). Refine the query.`,
   );
+}
+
+// ---- Telemetry (v1.2.0+) ---------------------------------------------------
+// Anonymous aggregate only. See PRIVACY.md. NO IPs, NO payloads, NO user
+// identifiers, NO sub-day timestamps. The country code from request.cf is
+// bucketed before recording to prevent quasi-identification at small volumes.
+
+interface TelemetryEnv {
+  TELEMETRY?: AnalyticsEngineDataset;
+  TELEMETRY_DISABLED?: string;
+}
+
+const EU_COUNTRIES: ReadonlySet<string> = new Set([
+  // GB included post-Brexit for privacy bucketing — see PRIVACY.md §1.
+  // Categorization choice (rough geographic signal), not a factual EU membership claim.
+  "AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","HU","IE","IT",
+  "LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE","GB",
+]);
+
+function bucketCountry(raw: string | undefined | null): "US" | "NA-other" | "EU" | "Other" | "??" {
+  if (!raw) return "??";
+  if (raw === "US") return "US";
+  if (raw === "CA" || raw === "MX") return "NA-other";
+  if (EU_COUNTRIES.has(raw)) return "EU";
+  return "Other";
+}
+
+/**
+ * Fire-and-forget event recording. AnalyticsEngineDataset.writeDataPoint is
+ * non-blocking by Cloudflare's contract — no Promise to await. We keep
+ * recordEvent synchronous and swallow all errors so user requests are never
+ * affected by telemetry failure.
+ */
+function recordEvent(
+  env: TelemetryEnv,
+  request: Request<unknown, IncomingRequestCfProperties>,
+  toolName: string,
+  ok: boolean,
+): void {
+  try {
+    if (env.TELEMETRY_DISABLED === "1") return;
+    if (!env.TELEMETRY) return;
+    const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC, day granularity only
+    const country = request.cf?.country;
+    const bucket = bucketCountry(country);
+    env.TELEMETRY.writeDataPoint({
+      blobs: [toolName, bucket],
+      doubles: [ok ? 1 : 0],
+      indexes: [date],
+    });
+  } catch {
+    // Telemetry failure is never propagated.
+  }
 }
 
 function buildCalendarNotes(
@@ -2308,7 +2365,7 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Mc
     case "health_check": {
       return jsonContent({
         runtime: "cloudflare-workers",
-        version: "1.1.2",
+        version: "1.2.0",
         index_row_count: corpus.indexRowCount,
         policies_in_corpus: POLICIES.length,
         corpus_built_at: corpus.builtAt,
@@ -2426,7 +2483,7 @@ function coursesParseQualityWorker(): {
   };
 }
 
-async function handleRpc(req: JsonRpcRequest): Promise<JsonRpcResponse | null> {
+async function handleRpc(req: JsonRpcRequest, env: TelemetryEnv, request: Request<unknown, IncomingRequestCfProperties>): Promise<JsonRpcResponse | null> {
   const id = req.id ?? null;
   switch (req.method) {
     case "initialize":
@@ -2435,7 +2492,7 @@ async function handleRpc(req: JsonRpcRequest): Promise<JsonRpcResponse | null> {
         id,
         result: {
           protocolVersion: PROTOCOL_VERSION,
-          serverInfo: { name: "msstate-policies", version: "1.1.2" },
+          serverInfo: { name: "msstate-policies", version: "1.2.0" },
           capabilities: { tools: { listChanged: false } },
           instructions: SERVER_INSTRUCTIONS,
         },
@@ -2454,6 +2511,8 @@ async function handleRpc(req: JsonRpcRequest): Promise<JsonRpcResponse | null> {
       const name = String(params.name ?? "");
       const args = (params.arguments ?? {}) as Record<string, unknown>;
       const result = await callTool(name, args);
+      const safeToolName = KNOWN_TOOL_NAMES.has(name) ? name : "[unknown]";
+      recordEvent(env, request, safeToolName, !result.isError);
       return { jsonrpc: "2.0", id, result };
     }
 
@@ -2492,7 +2551,11 @@ function withCors(response: Response): Response {
 // ---- Worker entry -----------------------------------------------------------
 
 export default {
-  async fetch(request: Request): Promise<Response> {
+  async fetch(
+    request: Request<unknown, IncomingRequestCfProperties>,
+    env: TelemetryEnv,
+    ctx: ExecutionContext,
+  ): Promise<Response> {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS") {
@@ -2506,7 +2569,7 @@ export default {
           JSON.stringify(
             {
               name: "msstate-policies-mcp",
-              version: "1.1.2",
+              version: "1.2.0",
               runtime: "cloudflare-workers",
               policies: POLICIES.length,
               builtAt: corpus.builtAt,
@@ -2594,7 +2657,7 @@ export default {
       }
 
       try {
-        const response = await handleRpc(body);
+        const response = await handleRpc(body, env, request);
         if (response === null) {
           return withCors(new Response(null, { status: 202 }));
         }

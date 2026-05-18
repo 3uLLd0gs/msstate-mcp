@@ -460,6 +460,7 @@ Full eval artifacts in [`msstate-policies/eval/`](msstate-policies/eval/).
 - **Architecture, decision history, threat model, eval methodology** — [`docs/BUILD.md`](docs/BUILD.md)
 - **Load-bearing rules for contributors** (corpus rule, stderr-only logging, security-score contract) — [`CLAUDE.md`](CLAUDE.md)
 - **Security disclosure + out-of-scope abuse classes** — [`SECURITY.md`](SECURITY.md)
+- **Privacy** — [PRIVACY.md](PRIVACY.md). What the hosted Worker records (anonymous aggregate only) and how to use the project without any telemetry.
 - **In-progress design specs and plans** live under `.dev/` (visible in the repo, de-emphasized via the leading-dot convention). See [`.dev/README.md`](.dev/README.md).
 
 Issues and PRs welcome at <https://github.com/3uLLd0gs/msstate-mcp>.
