@@ -37,6 +37,8 @@ This project follows simple supported-version rules:
 
 ## What's in scope
 
+> **Privacy contract:** see [PRIVACY.md](PRIVACY.md) for what the hosted Worker records and how to opt out. The short version: anonymous aggregate telemetry only; the npm/plugin install records nothing.
+
 Reportable issues include:
 
 - Code execution, supply-chain attacks (typosquatting, malicious dependencies), or compromised release artifacts.

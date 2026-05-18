@@ -171,6 +171,7 @@ A few patterns to keep in mind so the score doesn't drift:
   - **CAL5 (regression-guard)**: `Authorization` stays out of Worker CORS allowlist.
 - `SECURITY.md` `## Out of scope: client-side circumvention` captures the user-side abuse classes we explicitly disclaim. Treat that section as authoritative when triaging issue reports — anything matching those bullets is `wontfix` by design.
 - `SECURITY.md` `## Build-time egress (v0.5.0)` documents that `ANTHROPIC_API_KEY` is build-time only; runtime deploys (Worker, npm) make no third-party calls.
+- **Telemetry (v1.2.0+, added 2026-05-18)**: the Cloudflare Worker writes anonymous aggregate events to Cloudflare Analytics Engine — `(date, tool_name, country_bucket, ok)` only, one event per tool call. NO IPs, NO payloads, NO user identifiers, NO sub-day timestamps. Country is bucketed (`US / NA-other / EU / Other / ??`) before write, never raw country code. Query helper `scripts/telemetry-summary.mjs` enforces `HAVING calls >= 5` k-anonymity. Tool name is allowlisted against the static `TOOLS` array; unknown names are clamped to `[unknown]` to prevent indirect payload smuggling via `params.name`. Opt-out at the maintainer level via `TELEMETRY_DISABLED=1` env var; users who object switch to the npm install (records nothing). Full policy in [PRIVACY.md](PRIVACY.md). Security checks TEL1-TEL4 are mechanically enforced.
 
 ### Corpus extension (2026-05-13d) — online programs (v1.0.0)
 
