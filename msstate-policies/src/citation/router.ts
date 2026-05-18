@@ -30,7 +30,11 @@ export function splitClaims(text: string): string[] {
   return truncated.slice(0, MAX_CLAIMS);
 }
 
-const COURSE_CODE_RE = /\b[A-Z]{2,4}\s\d{4}\b/;
+// 3-letter minimum prefix: excludes admin codes like "HR 2024" / "IT 9001"
+// while still covering all 3-4 letter MSU department codes (CSE, MA(TH), PHYS).
+// Two-letter MSU dept codes (EC, FO) are rare; if needed, callers can pass
+// domain_hints=["courses"] to bypass the heuristic.
+const COURSE_CODE_RE = /\b[A-Z]{3,4}\s\d{4}\b/;
 const POLICY_OP_RE = /\b(OP|operating policy)\s*\d{2}\.\d{2,3}\b/i;
 const DOLLAR_RE = /\$\s?\d/;
 const MONTH_DAY_RE = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\b/i;
@@ -52,8 +56,8 @@ const ONLINE_TERMS = new Set([
 ]);
 
 const DINING_TERMS = new Set([
-  "dining", "cafeteria", "restaurant", "perry", "chick-fil-a", "starbucks",
-  "open", "closes", "hours", "lunch", "breakfast", "dinner", "meal plan",
+  "dining", "cafeteria", "restaurant", "perry cafeteria", "chick-fil-a", "starbucks",
+  "lunch", "breakfast", "dinner", "meal plan",
 ]);
 
 const CALENDAR_TERMS = new Set([
@@ -88,6 +92,9 @@ export function routeClaim(claim: string, hints: readonly CitationDomain[] | und
   if (DOLLAR_RE.test(claim) && anyTermMatch(claim, TUITION_TERMS)) return "tuition";
   if (MONTH_DAY_RE.test(claim) || anyTermMatch(claim, CALENDAR_TERMS)) return "calendar";
   if (anyTermMatch(claim, DINING_TERMS)) return "dining";
+  // Two-pass tuition: high-precision (dollar + term) ran first above;
+  // fall back to term-alone here so "scholarship covers fees" still routes
+  // to tuition without competing with calendar/dining keyword matches.
   if (anyTermMatch(claim, TUITION_TERMS)) return "tuition";
   return null;
 }

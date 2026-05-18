@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { splitClaims } from "../../src/citation/router.js";
+import { splitClaims, routeClaim } from "../../src/citation/router.js";
 import { MAX_CLAIMS } from "../../src/citation/types.js";
 
 describe("splitClaims", () => {
@@ -34,8 +34,6 @@ describe("splitClaims", () => {
     assert.ok(r[1].length <= 800);
   });
 });
-
-import { routeClaim } from "../../src/citation/router.js";
 
 describe("routeClaim", () => {
   test("policy-shaped claim → policies", () => {
