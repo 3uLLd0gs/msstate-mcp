@@ -12,11 +12,13 @@
 | # | Decision | Default | Rationale |
 |---|---|---|---|
 | D1 | Telemetry backend | **Cloudflare Workers Analytics Engine** (AE) | Free up to 25 events/sec/script and ~10M events/month. Designed for exactly this. SQL queryable. No external dependency. |
-| D2 | What to record per request | `(date, tool_name, ok, country)` | Minimum signal that answers "any users?" + "which tools matter?" + rough geography (US-only would be a finding). No IPs, no payloads, no user identifiers, no timestamps below day granularity. |
-| D3 | How we view the data | Cloudflare dashboard SQL queries + a `scripts/telemetry-summary.mjs` helper | Private viewer. No public dashboard. Optional later: a maintainer-only monthly summary committed to the repo (e.g., `.dev/telemetry/2026-06.md`). |
+| D2 | What to record per request | `(date, tool_name, ok, country_bucket)` | Minimum signal that answers "any users?" + "which tools matter?" + rough geography. **`country_bucket` is regionalized — `US / NA-other / EU / Other` — NOT raw country code.** Raw country at small volumes is a quasi-identifier. No IPs, no payloads, no user identifiers, no timestamps below day granularity. |
+| D3 | How we view the data | Cloudflare dashboard SQL queries + a `scripts/telemetry-summary.mjs` helper that **enforces k-anonymity (suppresses any cell where N<5)**. | Private viewer. No public dashboard. Monthly snapshots committed to repo are deferred until 3+ months of data exist and k-anonymity rules are explicit. |
 | D4 | Privacy doc shape | **New `PRIVACY.md` at repo root + cross-reference from `SECURITY.md` and `README.md`** | Telemetry adds a real data-collection surface; deserves its own document, not buried in security. |
-| D5 | Opt-out mechanism | **Server-side flag `TELEMETRY_DISABLED=1`** environment var; per-request opt-out is impossible because the recording happens server-side. Document this clearly. | The MCP protocol has no client opt-out hook for anonymous server-side aggregate counts. The recording IS the product's analytics. Honest framing: "if you use the Worker, anonymous aggregate counts are recorded; if that's not acceptable, use the npm/plugin install which records nothing." |
-| D6 | When to record | **Before request execution + after.** Two events per call: `request_received` (with tool_name) and `request_completed` (with ok). Lets us measure error rates AND see incoming traffic even when tools throw. | Both events are still aggregate-only. |
+| D5 | Opt-out mechanism | **Server-side flag `TELEMETRY_DISABLED=1`** environment var; per-request opt-out is impossible because the recording happens server-side. Document this clearly in `PRIVACY.md` + a comment in `wrangler.toml`. | The MCP protocol has no client opt-out hook for anonymous server-side aggregate counts. The recording IS the product's analytics. Honest framing: "if you use the Worker, anonymous aggregate counts are recorded; if that's not acceptable, use the npm/plugin install which records nothing." |
+| D6 | When to record | **Single event per tool call: `completed` with `ok: bool`.** Originally the plan called for two events (`received` + `completed`) but that doubles AE volume for marginal value — Worker crashes mid-dispatch are <0.1% of requests under current defensive try/catch coverage, and the `ok=1` placeholder on `received` confuses naive queries. Drop. | One event per call. `ok=true` only set after dispatch returns successfully. |
+| D7 | Success threshold (pre-commit) | **≥5 unique-day requests/week for ≥4 consecutive weeks** = "real usage, continue investing". <5/week for 8 consecutive weeks = "consider archiving the project". | Pre-commit BEFORE seeing data to avoid hindsight bias. Numbers can move with explicit justification; the discipline is committing now. |
+| D8 | Semver impact | **`1.1.2 → 1.2.0` minor bump** (originally drafted as patch). Adding a data-collection surface changes the user contract; users with subscribed update flows deserve the heads-up of a minor bump, not silent patch. | Style call: minor bumps invite scrutiny; patches don't. Privacy-sensitive change → minor. |
 
 ---
 
@@ -95,20 +97,29 @@ interface TelemetryEnv {
   TELEMETRY_DISABLED?: string;
 }
 
+function bucketCountry(raw: string | undefined | null): "US" | "NA-other" | "EU" | "Other" | "??" {
+  if (!raw) return "??";
+  if (raw === "US") return "US";
+  if (raw === "CA" || raw === "MX") return "NA-other";
+  const EU = new Set(["AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","HU","IE","IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE","GB"]);
+  if (EU.has(raw)) return "EU";
+  return "Other";
+}
+
 function recordEvent(
   env: TelemetryEnv,
   request: Request,
-  phase: "received" | "completed",
   toolName: string,
   ok: boolean,
 ): void {
   if (env.TELEMETRY_DISABLED === "1") return;
   if (!env.TELEMETRY) return;
   const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
-  const country = (request as Request & { cf?: { country?: string } }).cf?.country ?? "??";
+  const country = (request as Request & { cf?: { country?: string } }).cf?.country;
+  const bucket = bucketCountry(country);
   try {
     env.TELEMETRY.writeDataPoint({
-      blobs: [phase, toolName, country],
+      blobs: [toolName, bucket],
       doubles: [ok ? 1 : 0],
       indexes: [date],
     });
@@ -118,9 +129,13 @@ function recordEvent(
 }
 ```
 
-Then thread `env` through the request handler (Workers signature change) and call:
-- `recordEvent(env, request, "received", toolName, true)` immediately after parsing the tools/call request, before dispatch.
-- `recordEvent(env, request, "completed", toolName, ok)` after dispatch returns, with `ok = !response.error`.
+Then thread `env` through the request handler (Workers signature change) and call **once per tool call, after dispatch returns**:
+
+```typescript
+recordEvent(env, request, toolName, !response.error);
+```
+
+We dropped the originally-planned `received` event (see D6) — single event per call halves AE volume and removes the misleading `ok=1` placeholder.
 
 ### Task 3 — Helper script for maintainer queries
 
@@ -147,18 +162,29 @@ if (!TOKEN || !ACCOUNT) {
   process.exit(1);
 }
 
-const days = parseInt(process.argv.includes("--days") ? process.argv[process.argv.indexOf("--days") + 1] : "7", 10);
+const rawDays = process.argv.includes("--days") ? process.argv[process.argv.indexOf("--days") + 1] : "7";
+const days = parseInt(rawDays, 10);
+if (!Number.isInteger(days) || days < 1 || days > 365) {
+  console.error("--days must be an integer 1-365");
+  process.exit(1);
+}
 const byTool = process.argv.includes("--by-tool");
+const K = 5; // k-anonymity threshold: suppress cells with fewer than K events
 
+// blob1 = tool, blob2 = country bucket (post-D6: single event per call, no phase field)
 const sql = byTool
-  ? `SELECT blob2 AS tool, count() AS calls
+  ? `SELECT blob1 AS tool, count() AS calls
      FROM msstate_mcp_events
-     WHERE blob1 = 'completed' AND timestamp >= NOW() - INTERVAL '${days}' DAY
-     GROUP BY tool ORDER BY calls DESC FORMAT JSON`
+     WHERE timestamp >= NOW() - INTERVAL '${days}' DAY
+     GROUP BY tool
+     HAVING calls >= ${K}
+     ORDER BY calls DESC FORMAT JSON`
   : `SELECT toDate(timestamp) AS day, count() AS calls
      FROM msstate_mcp_events
-     WHERE blob1 = 'completed' AND timestamp >= NOW() - INTERVAL '${days}' DAY
-     GROUP BY day ORDER BY day FORMAT JSON`;
+     WHERE timestamp >= NOW() - INTERVAL '${days}' DAY
+     GROUP BY day
+     HAVING calls >= ${K}
+     ORDER BY day FORMAT JSON`;
 
 const res = await fetch(
   `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}/analytics_engine/sql`,
@@ -201,8 +227,8 @@ Expected: see at least 1 event in the dataset.
 
 ### Task 7 — Version bump + release
 
-`1.1.2 → 1.1.3` patch. Same release flow as v1.1.2:
-- `sed` 4 sites
+`1.1.2 → 1.2.0` **minor** (not patch — see D8; data-collection-surface change deserves the heads-up). Same flow:
+- `sed` 4 sites (`1.1.2` → `1.2.0`)
 - `npm run build`
 - Commit
 - Push, PR, CI, merge
@@ -212,15 +238,16 @@ Expected: see at least 1 event in the dataset.
 
 ## 3. Privacy invariants (load-bearing — security-checklist enforces)
 
-For the static checklist, add `TEL1`–`TEL3`:
+For the static checklist, add `TEL1`–`TEL4`:
 
 | Check | Pts | Asserts |
 |---|---|---|
-| TEL1 | 2 | `recordEvent` exists in worker source AND never references `request.headers.get` (no header capture) |
-| TEL2 | 2 | `wrangler.toml` declares the analytics_engine_datasets binding |
-| TEL3 | 2 | `PRIVACY.md` exists at repo root |
+| TEL1 | 2 | `recordEvent` exists in worker source AND its body (next ~20 lines after the function declaration) contains NO calls to `request.headers.get`, `request.url`, or anything from `cookies` / `body`. Scope: function body only, not whole file (the file legitimately uses `headers.get("content-length")` elsewhere). |
+| TEL2 | 2 | `wrangler.toml` declares an `analytics_engine_datasets` binding named exactly `TELEMETRY` (binding name matches runtime contract). |
+| TEL3 | 2 | `PRIVACY.md` exists at repo root AND contains the strings `Cloudflare Workers Analytics Engine`, `country_bucket`, `tool name`, `Last updated`. Catches the stale / hollow-shell case. |
+| TEL4 | 2 | `bucketCountry` function present in scraper source AND maps raw country codes to one of `{US, NA-other, EU, Other, ??}` — verifies the k-anonymity-by-design choice didn't quietly drift back to raw country codes. |
 
-These cement the privacy contract mechanically. +6 pts; new security baseline **290**.
+These cement the privacy contract mechanically. +8 pts; new security baseline **292**.
 
 ---
 
@@ -229,10 +256,14 @@ These cement the privacy contract mechanically. +6 pts; new security baseline **
 | Failure | Handling |
 |---|---|
 | AE write fails | Wrapped in try/catch; never propagates |
-| User sends garbage to /mcp | Tool name is "unknown"; phase is "received" only |
-| Cloudflare quota exceeded | We'd see this in CF dashboard before users do; AE silently drops events past the limit (free tier 10M/month is ~330k/day — well above our worst-case) |
-| Country header missing | Falls back to "??" |
-| Worker error before recording starts | No telemetry; we see request count = 0 for that period even if users hit the endpoint. Acceptable. |
+| AE dataset not provisioned on first deploy | **Need verification step** — added to Task 6: after first deploy, run a smoke request and confirm an event lands within 60s. If empty, the dataset wasn't auto-created; provision via Cloudflare dashboard before retrying. |
+| User sends garbage to /mcp | Tool name is "unknown" → still recorded with `ok: false`; aggregate stays useful. |
+| Cloudflare quota exceeded | AE silently drops events past the limit. CF free tier in 2026: 10M write ops/month + 25 events/sec — well above our worst-case at current usage. AE write ops are separate from the Workers 100k-requests/day quota. |
+| Country header missing | Falls back to `??` bucket. |
+| Country is spoofed (VPN / proxy) | Accept it; documented as "best-effort, not authoritative" in PRIVACY.md. |
+| Worker error before recording starts | No telemetry; we see request count = 0 for that period even if users hit the endpoint. Acceptable trade-off — recording happens AFTER dispatch returns. |
+| Cron workflow redeploys without AE binding | The binding is in `wrangler.toml`; cron workflows pick it up. But if the deploy account has AE disabled, writes silently fail. Add `set -e` + the post-deploy smoke check to both workflows. |
+| Traffic drops to zero for a week | Currently no alerting. Cheap follow-up: weekly cron + email if 7-day count = 0. Tracked as a Tier 4 improvement, not blocking v1.2.0. |
 
 ---
 
@@ -256,14 +287,15 @@ The Cloudflare Worker at `https://msstate-policies-mcp.mminsub90.workers.dev/mcp
 records **anonymous aggregate** telemetry. Every tool call writes one or two
 data points to Cloudflare Workers Analytics Engine:
 
-**Recorded per request:**
+**Recorded per request (one event per tool call, post-dispatch):**
 | Field | Example | Why |
 |---|---|---|
 | date | `2026-05-18` (UTC, day granularity only) | To compute daily request counts |
 | tool name | `find_msu_date` | To see which tools matter |
 | outcome | `1` (success) or `0` (error) | To detect breakage |
-| country | `US`, `CA`, `??` | To detect if anyone outside the US uses it |
-| phase | `received` or `completed` | To distinguish "did request arrive" from "did it succeed" |
+| country bucket | `US`, `NA-other`, `EU`, `Other`, `??` | Rough geographic signal — NOT raw country code (raw country at small volumes is a quasi-identifier). |
+
+Aggregate queries enforce **k-anonymity (N≥5)** — cells with fewer than 5 events in the window are suppressed entirely. Combined with the bucketed country, this prevents the dataset from identifying any single user even at very small volumes.
 
 **Explicitly NOT recorded:**
 - The query string / question content
@@ -333,10 +365,14 @@ the Claude Code plugin**. Those record nothing.
 We commit to revising this document and bumping its "Last updated" date
 whenever any of the following changes:
 - The set of recorded fields
-- The data retention period
+- The data retention period (including changes to Cloudflare's policy that
+  our doc cites)
 - The list of people with access
 - The list of third parties involved
 - The opt-out story
+- The country-bucket scheme (e.g., if we ever decided to record raw
+  country codes again, that's a privacy-policy-update event)
+- The k-anonymity threshold in our query helper
 
 The document is in version control. The full history is at
 `https://github.com/3uLLd0gs/msstate-mcp/commits/main/PRIVACY.md`.
@@ -385,10 +421,47 @@ use the GitHub Security Advisory flow described in `SECURITY.md`.
 | Q | Default |
 |---|---|
 | Cloudflare account ID — do you have one already, or new free account? | Existing (we deploy the Worker already; same account) |
-| Is the "country = US-only finding" worth recording? Could omit for stricter privacy. | Record it. Geographic narrowing is one of the strategic-decision signals. |
+| Country bucketing scheme — `US / NA-other / EU / Other / ??` correct? Or do you want a different bucketing (e.g., add MS for Mississippi-specific signal)? | The four-bucket scheme above. Adding a Mississippi bucket would require a state-level signal (CF only gives country) — defer. |
 | Should `scripts/telemetry-summary.mjs` be a private one-off or tracked in repo? | Tracked. No secrets in the script itself; access requires CF_ACCOUNT_ID + token in .env. |
-| Should we commit monthly aggregate snapshots back to the repo (e.g., `.dev/telemetry/2026-06.md`)? | Optional. Decide after we see a month of data. |
+| Should we commit monthly aggregate snapshots back to the repo (e.g., `.dev/telemetry/2026-06.md`)? | Defer until ≥3 months of data exist AND we've defined explicit k-anonymity rules for any committed snapshot (no per-tool-per-day cell with N<5). |
+| AE auto-provisioning verified? | NO — Task 6 now includes a post-deploy smoke check. If the dataset wasn't auto-created, we provision via dashboard before retrying. |
+| Pre-commit success threshold | `≥5 unique-day requests/week for 4 weeks` = real usage; `<5 for 8 weeks` = consider archive. Committed in D7. |
+| Semver impact | Minor bump (`1.1.2 → 1.2.0`), not patch — committed in D8. |
 
 ---
 
 If the defaults look right, I'll execute the 7 tasks straight through.
+
+---
+
+## 8. Changelog of this plan (post-review)
+
+This plan was reviewed on 2026-05-18 and edited inline. Summary of edits:
+
+**Tier 1 — privacy / correctness:**
+- D2: raw country → bucketed country (`US / NA-other / EU / Other / ??`)
+- D3: query helper enforces k-anonymity (N≥5 cells only)
+- D6: dropped the `received` phase event (was misleading + doubled volume)
+- Task 2: `recordEvent` simplified to single event per call + `bucketCountry()` helper
+- TEL1: scoped the "no headers in recordEvent" check to function body only (the file legitimately uses `headers.get("content-length")` for the 413 cap)
+- TEL3: strengthened (PRIVACY.md must contain specific anchor strings)
+- TEL4 added: `bucketCountry` mapping must remain in source (prevents quiet drift back to raw country)
+
+**Tier 2 — robustness:**
+- Task 6: added post-deploy AE-event smoke check (catches "dataset not provisioned" failure mode)
+- `telemetry-summary.mjs`: input validation on `--days`; k-anonymity HAVING clause
+- Failure-modes table: added AE-not-provisioned + cron-redeploy + zero-traffic-alert rows
+
+**Tier 3 — honest framing:**
+- D7 added: pre-committed success threshold (5/week × 4 weeks)
+- D8 added: minor (not patch) bump for the data-collection-surface change
+- PRIVACY.md §7: added Cloudflare retention-change + bucket-scheme-change as update triggers
+- Open questions: removed "is country worth recording" (answered: only as bucket)
+
+**Tier 4 — nice-to-have (deferred, not blocking v1.2.0):**
+- Weekly zero-traffic alerting cron
+- Unit test for `recordEvent` (Worker is single-file; testing requires extraction)
+- Mermaid-diagram label inconsistency (cosmetic)
+- Cloudflare-level analytics as a separate debugging signal
+
+Net effect: score baseline 290 → 292 (TEL4 added); release shape moves from patch to minor; privacy invariants tightened from "no IPs" to "no IPs AND bucketed country AND k-anonymity in queries".
