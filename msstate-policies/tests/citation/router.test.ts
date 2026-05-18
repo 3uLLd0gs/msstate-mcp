@@ -28,7 +28,7 @@ describe("splitClaims", () => {
     assert.equal(r.length, MAX_CLAIMS);
   });
   test("truncates over-long claim to MAX_CLAIM_CHARS", () => {
-    const long = "x".repeat(2000);
+    const long = "X".repeat(2000);
     const r = splitClaims(`Short. ${long}.`);
     assert.equal(r.length, 2);
     assert.ok(r[1].length <= 800);

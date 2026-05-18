@@ -23,7 +23,7 @@ export function splitClaims(text: string): string[] {
   const normalized = text.replace(/\s+/g, " ").trim();
   if (normalized.length === 0) return [];
   const parts = normalized
-    .split(/(?<=[.!?])\s+(?=[A-Za-z0-9$])/)
+    .split(/(?<=[.!?])\s+(?=[A-Z0-9$])/)
     .map((s) => s.replace(/[.!?]+$/, "").trim())
     .filter((s) => s.length > 0);
   const truncated = parts.map((s) => (s.length > MAX_CLAIM_CHARS ? s.slice(0, MAX_CLAIM_CHARS) : s));
