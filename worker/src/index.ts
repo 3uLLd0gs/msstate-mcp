@@ -1689,6 +1689,10 @@ const TOOLS = [
   },
 ] as const;
 
+// Allowlist of tool names we ourselves defined. Used to guard the telemetry
+// write so that arbitrary caller-supplied strings can never reach AE.
+const KNOWN_TOOL_NAMES: Set<string> = new Set(TOOLS.map((t) => t.name));
+
 // ---- Tool handlers ----------------------------------------------------------
 
 interface McpContent {
@@ -1738,6 +1742,8 @@ interface TelemetryEnv {
 }
 
 const EU_COUNTRIES = new Set([
+  // GB included post-Brexit for privacy bucketing — see PRIVACY.md §1.
+  // Categorization choice (rough geographic signal), not a factual EU membership claim.
   "AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","HU","IE","IT",
   "LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE","GB",
 ]);
@@ -1756,12 +1762,12 @@ function recordEvent(
   toolName: string,
   ok: boolean,
 ): void {
-  if (env.TELEMETRY_DISABLED === "1") return;
-  if (!env.TELEMETRY) return;
-  const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC, day granularity only
-  const country = (request as Request & { cf?: { country?: string } }).cf?.country;
-  const bucket = bucketCountry(country);
   try {
+    if (env.TELEMETRY_DISABLED === "1") return;
+    if (!env.TELEMETRY) return;
+    const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC, day granularity only
+    const country = (request as Request & { cf?: { country?: string } }).cf?.country;
+    const bucket = bucketCountry(country);
     env.TELEMETRY.writeDataPoint({
       blobs: [toolName, bucket],
       doubles: [ok ? 1 : 0],
@@ -1799,7 +1805,7 @@ function buildCalendarNotes(
   return modeNote;
 }
 
-async function callTool(name: string, args: Record<string, unknown>, _env?: TelemetryEnv): Promise<McpToolResponse> {
+async function callTool(name: string, args: Record<string, unknown>): Promise<McpToolResponse> {
   switch (name) {
     case "search_policies": {
       const query = String(args.query ?? "");
@@ -2504,8 +2510,9 @@ async function handleRpc(req: JsonRpcRequest, env: TelemetryEnv, request: Reques
       const params = req.params ?? {};
       const name = String(params.name ?? "");
       const args = (params.arguments ?? {}) as Record<string, unknown>;
-      const result = await callTool(name, args, env);
-      recordEvent(env, request, name, !result.isError);
+      const result = await callTool(name, args);
+      const safeToolName = KNOWN_TOOL_NAMES.has(name) ? name : "[unknown]";
+      recordEvent(env, request, safeToolName, !result.isError);
       return { jsonrpc: "2.0", id, result };
     }
 
