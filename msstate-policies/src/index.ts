@@ -47,6 +47,7 @@ import { list_online_programs } from "./tools/list_online_programs.js";
 import { get_online_program } from "./tools/get_online_program.js";
 import { get_online_admissions_process } from "./tools/get_online_admissions_process.js";
 import { find_online_info } from "./tools/find_online_info.js";
+import { list_programs_by_staff } from "./tools/list_programs_by_staff.js";
 import { setOnlineCorpus } from "./online/corpus.js";
 import type { OnlineCorpus } from "./online/types.js";
 import { list_msu_dining_locations } from "./tools/list_msu_dining_locations.js";
@@ -110,6 +111,7 @@ const TOOLS = [
   get_online_program,
   get_online_admissions_process,
   find_online_info,
+  list_programs_by_staff,
   list_msu_dining_locations,
   get_msu_dining_hours,
   health_check,

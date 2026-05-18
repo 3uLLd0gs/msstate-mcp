@@ -37,6 +37,9 @@ import type {
   OnlineAdmissionsProcess,
   OnlineStaffEntry,
   OnlineInfoPage,
+  ProgramRef,
+  StaffEntry,
+  StaffToProgramsIndex,
 } from "./types.js";
 
 /** Sentinel value replaced by the scraper with the actual fetch timestamp. */
@@ -307,6 +310,9 @@ function extractTuition(
     const $table = $cowbell.next("div.table-responsive, table").find("table").addBack("table").first();
     // The table is a sibling of the tuitioncowbell div, inside a shared parent
     const $parent = $cowbell.parent();
+    // Strip page-chrome and analytics injectors before .text() — these leak
+    // GTM noscript-iframe HTML and nav menu strings into raw_prose.
+    $parent.find("script, style, noscript, iframe, nav, header, footer").remove();
     $parent.find("table tr").each((_, tr) => {
       const cells = $(tr)
         .find("td")
@@ -524,7 +530,10 @@ export function parseProgramHtml(
     }
     if (!tuition.raw_prose) {
       const $block = $("strong#credit_hours").closest("div.quickInner");
-      if ($block.length) tuition.raw_prose = $block.text().trim().slice(0, 400);
+      if ($block.length) {
+        $block.find("script, style, noscript, iframe, nav, header, footer").remove();
+        tuition.raw_prose = $block.text().trim().slice(0, 400);
+      }
     }
   }
 
@@ -1022,4 +1031,74 @@ export function parseSupportPageHtml(
     body_markdown,
     retrieved_at: RETRIEVED_AT_PLACEHOLDER,
   };
+}
+
+// ---- Staff-to-programs inverted index (build-time) -------------------------
+
+function normalizeStaffKey(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Build the staff→programs inverted index from the assembled programs and
+ * the central staff directory. Dedup key: lowercased email when present,
+ * else normalized name. On collision, longest display_name wins.
+ *
+ * Each staff member's `role` is enriched from `staff_directory` (matched by
+ * email) when available — falls back to the first program-contact title.
+ */
+export function buildStaffToProgramsIndex(
+  programs: OnlineProgram[],
+  staff_directory: OnlineStaffEntry[],
+): StaffToProgramsIndex {
+  const byKey = new Map<string, StaffEntry>();
+
+  for (const p of programs) {
+    for (const c of p.contacts) {
+      const key = c.email
+        ? c.email.toLowerCase()
+        : normalizeStaffKey(c.name);
+      if (!key) continue;
+
+      const existing = byKey.get(key);
+      const programRef: ProgramRef = {
+        slug: p.slug,
+        name: p.name,
+        role_in_program: c.title,
+      };
+
+      if (existing) {
+        // Longest spelling wins (handles "Sam" vs "Samantha")
+        if (c.name.length > existing.display_name.length) {
+          existing.display_name = c.name;
+        }
+        existing.programs.push(programRef);
+      } else {
+        byKey.set(key, {
+          display_name: c.name,
+          email: c.email ?? null,
+          role: c.title,
+          programs: [programRef],
+        });
+      }
+    }
+  }
+
+  // Enrich role from staff_directory by email match (more authoritative title)
+  for (const entry of byKey.values()) {
+    if (!entry.email) continue;
+    const dirEntry = staff_directory.find(
+      (s) => s.email && s.email.toLowerCase() === entry.email!.toLowerCase(),
+    );
+    if (dirEntry && dirEntry.title) {
+      entry.role = dirEntry.title;
+    }
+  }
+
+  return Array.from(byKey.values());
 }
