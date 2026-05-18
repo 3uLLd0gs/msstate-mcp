@@ -34,10 +34,14 @@ const args = process.argv.slice(2);
 
 function parseDays() {
   const idx = args.indexOf("--days");
+  if (idx >= 0 && idx + 1 >= args.length) {
+    console.error("--days requires a value (e.g. --days 7).");
+    process.exit(1);
+  }
   const raw = idx >= 0 ? args[idx + 1] : "7";
   const n = parseInt(raw, 10);
   if (!Number.isInteger(n) || n < 1 || n > 365) {
-    console.error(`--days must be an integer in [1, 365] (got: ${raw})`);
+    console.error(`--days must be an integer in [1, 365] (got: ${JSON.stringify(raw)})`);
     process.exit(1);
   }
   return n;

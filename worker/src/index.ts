@@ -1691,7 +1691,7 @@ const TOOLS = [
 
 // Allowlist of tool names we ourselves defined. Used to guard the telemetry
 // write so that arbitrary caller-supplied strings can never reach AE.
-const KNOWN_TOOL_NAMES: Set<string> = new Set(TOOLS.map((t) => t.name));
+const KNOWN_TOOL_NAMES: ReadonlySet<string> = new Set(TOOLS.map((t) => t.name));
 
 // ---- Tool handlers ----------------------------------------------------------
 
@@ -1731,17 +1731,11 @@ function tooLong(name: string, value: string): McpToolResponse {
 // bucketed before recording to prevent quasi-identification at small volumes.
 
 interface TelemetryEnv {
-  TELEMETRY?: {
-    writeDataPoint: (data: {
-      blobs?: string[];
-      doubles?: number[];
-      indexes?: string[];
-    }) => void;
-  };
+  TELEMETRY?: AnalyticsEngineDataset;
   TELEMETRY_DISABLED?: string;
 }
 
-const EU_COUNTRIES = new Set([
+const EU_COUNTRIES: ReadonlySet<string> = new Set([
   // GB included post-Brexit for privacy bucketing — see PRIVACY.md §1.
   // Categorization choice (rough geographic signal), not a factual EU membership claim.
   "AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","HU","IE","IT",
@@ -1756,9 +1750,15 @@ function bucketCountry(raw: string | undefined | null): "US" | "NA-other" | "EU"
   return "Other";
 }
 
+/**
+ * Fire-and-forget event recording. AnalyticsEngineDataset.writeDataPoint is
+ * non-blocking by Cloudflare's contract — no Promise to await. We keep
+ * recordEvent synchronous and swallow all errors so user requests are never
+ * affected by telemetry failure.
+ */
 function recordEvent(
   env: TelemetryEnv,
-  request: Request,
+  request: Request<unknown, IncomingRequestCfProperties>,
   toolName: string,
   ok: boolean,
 ): void {
@@ -1766,7 +1766,7 @@ function recordEvent(
     if (env.TELEMETRY_DISABLED === "1") return;
     if (!env.TELEMETRY) return;
     const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC, day granularity only
-    const country = (request as Request & { cf?: { country?: string } }).cf?.country;
+    const country = request.cf?.country;
     const bucket = bucketCountry(country);
     env.TELEMETRY.writeDataPoint({
       blobs: [toolName, bucket],
@@ -2483,7 +2483,7 @@ function coursesParseQualityWorker(): {
   };
 }
 
-async function handleRpc(req: JsonRpcRequest, env: TelemetryEnv, request: Request): Promise<JsonRpcResponse | null> {
+async function handleRpc(req: JsonRpcRequest, env: TelemetryEnv, request: Request<unknown, IncomingRequestCfProperties>): Promise<JsonRpcResponse | null> {
   const id = req.id ?? null;
   switch (req.method) {
     case "initialize":
@@ -2551,7 +2551,11 @@ function withCors(response: Response): Response {
 // ---- Worker entry -----------------------------------------------------------
 
 export default {
-  async fetch(request: Request, env: TelemetryEnv): Promise<Response> {
+  async fetch(
+    request: Request<unknown, IncomingRequestCfProperties>,
+    env: TelemetryEnv,
+    ctx: ExecutionContext,
+  ): Promise<Response> {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS") {
