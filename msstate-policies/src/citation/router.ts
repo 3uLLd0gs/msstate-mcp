@@ -28,16 +28,21 @@ import { searchCalendarRows } from "../calendars/search.js";
 // or end-of-string. Lenient — over-splits are preferable to under-splits
 // (each becomes its own claim). Truncates each to MAX_CLAIM_CHARS and caps
 // the count at MAX_CLAIMS.
-export function splitClaims(text: string): string[] {
-  if (!text || typeof text !== "string") return [];
+export interface SplitClaimsResult {
+  claims: string[];        // truncated to MAX_CLAIMS
+  totalBeforeCap: number;  // pre-slice count, used by the tool to set truncated flag honestly
+}
+
+export function splitClaims(text: string): SplitClaimsResult {
+  if (!text || typeof text !== "string") return { claims: [], totalBeforeCap: 0 };
   const normalized = text.replace(/\s+/g, " ").trim();
-  if (normalized.length === 0) return [];
+  if (normalized.length === 0) return { claims: [], totalBeforeCap: 0 };
   const parts = normalized
     .split(/(?<=[.!?])\s+(?=[A-Z0-9$])/)
     .map((s) => s.replace(/[.!?]+$/, "").trim())
     .filter((s) => s.length > 0);
   const truncated = parts.map((s) => (s.length > MAX_CLAIM_CHARS ? s.slice(0, MAX_CLAIM_CHARS) : s));
-  return truncated.slice(0, MAX_CLAIMS);
+  return { claims: truncated.slice(0, MAX_CLAIMS), totalBeforeCap: truncated.length };
 }
 
 // 3-letter minimum prefix: excludes admin codes like "HR 2024" / "IT 9001"

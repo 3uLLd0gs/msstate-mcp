@@ -1393,16 +1393,21 @@ interface CitationCard {
   reason: string;
 }
 
-function citSplitClaims(text: string): string[] {
-  if (!text || typeof text !== "string") return [];
+interface CitSplitClaimsResult {
+  claims: string[];        // truncated to MAX_CITATION_CLAIMS
+  totalBeforeCap: number;  // pre-slice count, used by the tool to set truncated flag honestly
+}
+
+function citSplitClaims(text: string): CitSplitClaimsResult {
+  if (!text || typeof text !== "string") return { claims: [], totalBeforeCap: 0 };
   const normalized = text.replace(/\s+/g, " ").trim();
-  if (normalized.length === 0) return [];
+  if (normalized.length === 0) return { claims: [], totalBeforeCap: 0 };
   const parts = normalized
     .split(/(?<=[.!?])\s+(?=[A-Z0-9$])/)
     .map((s) => s.replace(/[.!?]+$/, "").trim())
     .filter((s) => s.length > 0);
   const truncated = parts.map((s) => (s.length > MAX_CITATION_CLAIM_CHARS ? s.slice(0, MAX_CITATION_CLAIM_CHARS) : s));
-  return truncated.slice(0, MAX_CITATION_CLAIMS);
+  return { claims: truncated.slice(0, MAX_CITATION_CLAIMS), totalBeforeCap: truncated.length };
 }
 
 const CIT_COURSE_CODE_RE = /\b[A-Z]{3,4}\s\d{4}\b/;
@@ -2651,8 +2656,9 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Mc
         const bad = hints.find((h) => !(CITATION_ALL_DOMAINS as readonly string[]).includes(h));
         if (bad) return errorContent(`citation_card: unknown domain_hint '${bad}'. Valid: ${CITATION_ALL_DOMAINS.join(", ")}.`);
       }
-      const rawClaims = citSplitClaims(text);
-      const truncated = rawClaims.length >= MAX_CITATION_CLAIMS;
+      const split = citSplitClaims(text);
+      const rawClaims = split.claims;
+      const truncated = split.totalBeforeCap > MAX_CITATION_CLAIMS;
       const cards: CitationCard[] = [];
       const counts: Record<string, number> = {
         policies: 0, calendar: 0, courses: 0, emergency: 0,

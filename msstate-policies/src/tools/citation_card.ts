@@ -31,8 +31,9 @@ export const citation_card = {
   zodSchema: Input,
   async handler(rawInput: unknown): Promise<{ content: Array<{ type: "text"; text: string }> }> {
     const input = Input.parse(rawInput);
-    const rawClaims = splitClaims(input.text);
-    const truncated = rawClaims.length >= MAX_CLAIMS;
+    const split = splitClaims(input.text);
+    const rawClaims = split.claims;
+    const truncated = split.totalBeforeCap > MAX_CLAIMS;
     const cards: CitationCard[] = [];
     const counts: Record<CitationDomain | "none", number> = {
       policies: 0, calendar: 0, courses: 0, emergency: 0,
