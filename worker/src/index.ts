@@ -1362,6 +1362,204 @@ function snippetFor(text: string, query: string, windowChars = 240): string {
   return text.slice(0, windowChars).replace(/\s+/g, " ").trim() + (text.length > windowChars ? "…" : "");
 }
 
+// ---- Program matcher (inline mirror of src/online/matcher.ts) ---------------
+// Re-implemented here because the Worker is a separate bundle. Keep these
+// helpers and the dispatch cases below in sync with the stdio side.
+
+const MAX_MATCHES_WORKER = 5;
+
+interface MatcherProfileWorker {
+  career_goal?: string;
+  level_preference?: DegreeLevel;
+  budget_usd?: number;
+  time_budget_months?: number;
+  state?: string;
+  estimated_credits?: number;
+  include_application_fee?: boolean;
+}
+
+interface CostEstimateWorker {
+  slug: string;
+  name: string;
+  credits_used: number;
+  credits_source: "user_supplied" | "default_master_30" | "default_bachelor_120" | "default_doctoral_60" | "default_certificate_30";
+  per_credit_usd: number | null;
+  instructional_fee_per_credit_usd: number | null;
+  application_fee_usd: number | null;
+  application_fee_included: boolean;
+  tuition_total_usd: number | null;
+  instructional_fee_total_usd: number | null;
+  total_usd: number | null;
+  notes: string[];
+  source_url: string;
+  raw_prose: string;
+}
+
+interface MatchedProgramWorker {
+  slug: string;
+  name: string;
+  degree_level: DegreeLevel;
+  fit_score: number;
+  fit_reasons: string[];
+  application_deadline_next: OnlineApplicationDeadline | null;
+  primary_contact_name: string | null;
+  primary_contact_email: string | null;
+  estimated_total_usd: number | null;
+  estimated_total_credits: number | null;
+  state_authorization_flag: "ok" | "unknown" | "check_state_authorization_page";
+  url: string;
+}
+
+interface StateAuthorizationWorker {
+  authorized_states: string[];
+}
+
+function defaultCreditsForWorker(level: DegreeLevel): { credits: number; source: CostEstimateWorker["credits_source"] } {
+  switch (level) {
+    case "bachelor":     return { credits: 120, source: "default_bachelor_120" };
+    case "doctoral":     return { credits: 60,  source: "default_doctoral_60" };
+    case "certificate":  return { credits: 30,  source: "default_certificate_30" };
+    default:             return { credits: 30,  source: "default_master_30" };
+  }
+}
+
+function estimateCostWorker(
+  program: OnlineProgram,
+  credits: number | null,
+  includeApplicationFee: boolean,
+): CostEstimateWorker {
+  if (credits !== null && credits < 0) throw new Error("credits must be >= 0");
+  const notes: string[] = [];
+  const used = credits === null
+    ? defaultCreditsForWorker(program.degree_level)
+    : { credits, source: "user_supplied" as const };
+  const perCredit = program.tuition.per_credit_usd;
+  const instructional = program.tuition.instructional_fee_per_credit_usd;
+  const applicationFee = program.tuition.application_fee_domestic_usd;
+  const tuitionTotal = perCredit !== null ? perCredit * used.credits : null;
+  const instructionalTotal = instructional !== null ? instructional * used.credits : null;
+  if (perCredit === null) notes.push("per_credit_usd missing on this program's page — total cannot be computed");
+  if (instructional === null) notes.push("instructional_fee_per_credit_usd missing — component omitted from total");
+  if (credits === null) notes.push(`credits not supplied; defaulted to ${used.credits} for ${program.degree_level} programs`);
+  let total: number | null = null;
+  if (tuitionTotal !== null) {
+    total = tuitionTotal + (instructionalTotal ?? 0);
+    if (includeApplicationFee && applicationFee !== null) total += applicationFee;
+  }
+  return {
+    slug: program.slug,
+    name: program.name,
+    credits_used: used.credits,
+    credits_source: used.source,
+    per_credit_usd: perCredit,
+    instructional_fee_per_credit_usd: instructional,
+    application_fee_usd: applicationFee,
+    application_fee_included: includeApplicationFee && applicationFee !== null,
+    tuition_total_usd: tuitionTotal,
+    instructional_fee_total_usd: instructionalTotal,
+    total_usd: total,
+    notes,
+    source_url: program.url,
+    raw_prose: program.tuition.raw_prose,
+  };
+}
+
+const MATCHER_TOKEN_SPLIT_WORKER = /[\s\-_/.,;:()\[\]{}!?"'`<>|@#$%^&*=+]+/;
+function matcherTokenizeWorker(s: string): string[] {
+  return s.normalize("NFKC").toLowerCase().split(MATCHER_TOKEN_SPLIT_WORKER).filter((t) => t.length > 0);
+}
+
+function rankProgramsWorker(
+  programs: OnlineProgram[],
+  profile: MatcherProfileWorker,
+  stateAuth: StateAuthorizationWorker | null,
+): MatchedProgramWorker[] {
+  const candidates = profile.level_preference
+    ? programs.filter((p) => p.degree_level === profile.level_preference)
+    : programs;
+  const goalTokens = profile.career_goal ? new Set(matcherTokenizeWorker(profile.career_goal)) : null;
+  const includeAppFee = profile.include_application_fee ?? false;
+  const scored = candidates.map((p) => {
+    const reasons: string[] = [];
+    let score = 0;
+    if (goalTokens && goalTokens.size > 0) {
+      const haystack = new Set([...matcherTokenizeWorker(p.name), ...matcherTokenizeWorker(p.short_description)]);
+      let hits = 0;
+      for (const t of goalTokens) if (haystack.has(t)) hits++;
+      const goalScore = Math.min(60, (hits / goalTokens.size) * 60);
+      score += goalScore;
+      if (hits > 0) reasons.push(`matches career_goal tokens (${hits}/${goalTokens.size})`);
+    } else {
+      score += 30;
+    }
+    const cost = estimateCostWorker(p, profile.estimated_credits ?? null, includeAppFee);
+    if (profile.budget_usd !== undefined && cost.total_usd !== null) {
+      if (cost.total_usd <= profile.budget_usd) {
+        score += 30;
+        reasons.push(`within budget: $${cost.total_usd.toLocaleString()} <= $${profile.budget_usd.toLocaleString()}`);
+      } else {
+        const overshoot = (cost.total_usd - profile.budget_usd) / profile.budget_usd;
+        score += Math.max(-30, 30 - overshoot * 60);
+        reasons.push(`over budget: $${cost.total_usd.toLocaleString()} > $${profile.budget_usd.toLocaleString()}`);
+      }
+    } else {
+      score += 15;
+    }
+    if (profile.time_budget_months !== undefined) {
+      if (p.degree_level === "doctoral" && profile.time_budget_months < 36) score -= 10;
+      else if (p.degree_level === "bachelor" && profile.time_budget_months < 24) score -= 5;
+      else { score += 10; reasons.push(`level fits time budget (${profile.time_budget_months}mo)`); }
+    } else {
+      score += 5;
+    }
+    let stateFlag: MatchedProgramWorker["state_authorization_flag"] = "unknown";
+    if (profile.state) {
+      if (!stateAuth) {
+        stateFlag = "unknown";
+      } else if (stateAuth.authorized_states.includes(profile.state.toUpperCase())) {
+        stateFlag = "ok";
+        reasons.push(`state ${profile.state.toUpperCase()} in authorized list`);
+      } else {
+        stateFlag = "check_state_authorization_page";
+        reasons.push(`state ${profile.state.toUpperCase()} not in authorized list — confirm via state-authorization page`);
+      }
+    }
+    const primary = p.contacts[0] ?? null;
+    const nextDeadline = p.application_deadlines[0] ?? null;
+    return {
+      slug: p.slug,
+      name: p.name,
+      degree_level: p.degree_level,
+      fit_score: Math.max(0, Math.min(100, Math.round(score))),
+      fit_reasons: reasons,
+      application_deadline_next: nextDeadline,
+      primary_contact_name: primary?.name ?? null,
+      primary_contact_email: primary?.email ?? null,
+      estimated_total_usd: cost.total_usd,
+      estimated_total_credits: cost.credits_used,
+      state_authorization_flag: stateFlag,
+      url: p.url,
+    } as MatchedProgramWorker;
+  });
+  scored.sort((a, b) => b.fit_score - a.fit_score);
+  return scored.slice(0, MAX_MATCHES_WORKER);
+}
+
+const US_STATE_RE_WORKER = /\b([A-Z]{2})\b/g;
+const ALL_50_WORKER: ReadonlySet<string> = new Set(["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC"]);
+
+function parseStateAuthorizationWorker(): StateAuthorizationWorker | null {
+  const pages = ONLINE?.info_pages ?? [];
+  const page = pages.find((p) => p.slug === "state-authorization");
+  if (!page) return null;
+  const matches = new Set<string>();
+  for (const m of page.body_markdown.matchAll(US_STATE_RE_WORKER)) {
+    if (ALL_50_WORKER.has(m[1])) matches.add(m[1]);
+  }
+  if (matches.size === 0) return null;
+  return { authorized_states: [...matches] };
+}
+
 // ---- Citation router (inline mirror of src/citation/router.ts) -------------
 // Re-implemented here because the Worker is a separate bundle from
 // msstate-policies/. Keep the field/accessor names in this block aligned with
@@ -1936,6 +2134,51 @@ const TOOLS = [
         slug: { type: "string", description: "URL-tail slug, max 4096 chars" },
         name_query: { type: "string", description: "Fuzzy name query, max 4096 chars" },
       },
+    },
+  },
+  {
+    name: "match_online_program",
+    description:
+      "Rank MSU Online programs against a prospective-student profile. ALL fields optional — supply only what the user has stated. " +
+      "`career_goal` (free text — keyword overlap vs. program name + short_description), " +
+      "`level_preference` (HARD filter: bachelor / master / specialist / doctoral / certificate / endorsement), " +
+      "`budget_usd` (soft cap — programs over budget score lower but still appear; see estimate_program_cost for breakdown), " +
+      "`time_budget_months` (penalises doctoral < 36mo and bachelor < 24mo), " +
+      "`state` (2-letter postal code; cross-referenced against the state-authorization info page when present), " +
+      "`estimated_credits` (optional override for cost estimation; defaults per degree level), " +
+      "`include_application_fee` (default false). " +
+      "Returns up to 5 matches sorted by fit_score (0–100) with fit_reasons, estimated_total_usd, application_deadline_next, primary_contact_name/email, and state_authorization_flag (ok / unknown / check_state_authorization_page). " +
+      "Does NOT predict admission probability — only ranks fit. Always carries the online disclaimer.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        career_goal: { type: "string", description: "Free-text goal; max 4096 chars" },
+        level_preference: { type: "string", enum: ["bachelor", "master", "specialist", "doctoral", "certificate", "endorsement"] },
+        budget_usd: { type: "number", minimum: 0, maximum: 1000000 },
+        time_budget_months: { type: "integer", minimum: 1, maximum: 120 },
+        state: { type: "string", pattern: "^[A-Za-z]{2}$", description: "2-letter US postal code" },
+        estimated_credits: { type: "integer", minimum: 0, maximum: 500 },
+        include_application_fee: { type: "boolean" },
+      },
+    },
+  },
+  {
+    name: "estimate_program_cost",
+    description:
+      "Estimate the total cost of an MSU Online program: per_credit × credits + per-credit instructional fee, optionally + application fee. " +
+      "Provide `slug` (exact, from list_online_programs); `credits` (int 0–500) is OPTIONAL — when omitted, defaults to 30 (master/cert/specialist), 120 (bachelor), or 60 (doctoral). " +
+      "MSU Online does NOT publish total required credits in a structured field for every program; for an exact number, consult the program page (raw_prose is included in the response). " +
+      "`include_application_fee` defaults to false. " +
+      "Response carries the online disclaimer, source_url, and any explanatory notes when fields are missing. " +
+      "Out-of-state? MSU Online tuition is largely flat-rate; the published per_credit_usd is what applies to most residency cases.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slug: { type: "string", description: "Exact slug from list_online_programs; max 4096 chars" },
+        credits: { type: "integer", minimum: 0, maximum: 500 },
+        include_application_fee: { type: "boolean" },
+      },
+      required: ["slug"],
     },
   },
   {
@@ -2584,6 +2827,58 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Mc
       });
     }
 
+    case "match_online_program": {
+      const career_goal = typeof args?.career_goal === "string" ? args.career_goal : undefined;
+      if (career_goal !== undefined && career_goal.length > MAX_QUERY_CHARS) return tooLong("career_goal", career_goal);
+      const level_preference = typeof args?.level_preference === "string"
+        ? args.level_preference as DegreeLevel
+        : undefined;
+      const budget_usd = typeof args?.budget_usd === "number" ? args.budget_usd : undefined;
+      const time_budget_months = typeof args?.time_budget_months === "number" ? args.time_budget_months : undefined;
+      const state = typeof args?.state === "string" && /^[A-Za-z]{2}$/.test(args.state) ? args.state : undefined;
+      const estimated_credits = typeof args?.estimated_credits === "number" ? args.estimated_credits : undefined;
+      const include_application_fee = typeof args?.include_application_fee === "boolean" ? args.include_application_fee : undefined;
+
+      const programs = ONLINE?.programs ?? [];
+      const stateAuth = state ? parseStateAuthorizationWorker() : null;
+      const matches = rankProgramsWorker(programs, {
+        career_goal, level_preference, budget_usd, time_budget_months,
+        state, estimated_credits, include_application_fee,
+      }, stateAuth);
+      return jsonContent({
+        disclaimer: ONLINE_DISCLAIMER,
+        matches,
+        state_authorization_source: stateAuth ? "state-authorization info page" : null,
+        corpus_built_at: ONLINE?.builtAt ?? null,
+      });
+    }
+
+    case "estimate_program_cost": {
+      const slug = typeof args?.slug === "string" ? args.slug : "";
+      if (slug.length === 0) return errorContent("estimate_program_cost requires a non-empty `slug` argument.");
+      if (slug.length > MAX_QUERY_CHARS) return tooLong("slug", slug);
+      const credits = typeof args?.credits === "number" ? args.credits : null;
+      if (credits !== null && credits < 0) return errorContent("credits must be >= 0");
+      const include_application_fee = typeof args?.include_application_fee === "boolean" ? args.include_application_fee : false;
+
+      const program = (ONLINE?.programs ?? []).find((p) => p.slug === slug);
+      if (!program) {
+        return jsonContent({
+          disclaimer: ONLINE_DISCLAIMER,
+          estimate: null,
+          not_found_reason: `No program with slug '${slug}' in the corpus. Use list_online_programs to find valid slugs.`,
+          corpus_built_at: ONLINE?.builtAt ?? null,
+        });
+      }
+      const estimate = estimateCostWorker(program, credits, include_application_fee);
+      return jsonContent({
+        disclaimer: ONLINE_DISCLAIMER,
+        estimate,
+        not_found_reason: null,
+        corpus_built_at: ONLINE?.builtAt ?? null,
+      });
+    }
+
     case "list_msu_dining_locations": {
       const a = args as Record<string, unknown>;
       const open_now = typeof a.open_now === "boolean" ? a.open_now : undefined;
@@ -2753,7 +3048,7 @@ Routing rules — pick the tool whose CATEGORY matches the question. If your fir
 3. Course questions ("what's the prereq for...", "what does X unlock?", "find a class about Y") → search_msu_courses, get_msu_course, get_msu_course_graph.
 4. Emergency / safety questions (tornado, fire, active shooter, refuge area, MSU PD) → get_msu_emergency_guideline, find_msu_severe_weather_refuge, get_msu_emergency_contacts. For life-threatening situations, ALWAYS lead with "Call 911 now."
 5. Tuition / fee / cost questions ("how much is tuition", "college fees", "DVM cost") → get_msu_tuition_rate (structured: campus + level + residency), get_msu_enrollment_fees, find_msu_tuition_faq, list_msu_tuition_campuses.
-6. Online-program / online-admissions / online-student-services questions ("does MSU have an online MBA?", "how do I apply to MSU online?", "who's the advisor for the online psychology program?", "what's the application deadline for the online MS in Cybersecurity?", "does MSU online operate in my state?", "military assistance for MSU online") → list_online_programs / get_online_program / get_online_admissions_process / find_online_info, picked by question shape. Distinction from policies/courses/tuition: the online module covers MSU's ONLINE program offerings via online.msstate.edu — distinct from the broader policy/course/tuition corpus. Online-specific tuition rates from controller.msstate.edu stay under get_msu_tuition_rate.
+6. Online-program / online-admissions / online-student-services questions ("does MSU have an online MBA?", "how do I apply to MSU online?", "who's the advisor for the online psychology program?", "what's the application deadline for the online MS in Cybersecurity?", "does MSU online operate in my state?", "military assistance for MSU online", "which online program fits me?", "how much does an online master's cost?") → list_online_programs / get_online_program / get_online_admissions_process / find_online_info / list_programs_by_staff / match_online_program / estimate_program_cost, picked by question shape. Use match_online_program when the user describes a profile (career goal, budget, level, state) and wants a shortlist; use estimate_program_cost when the user names a specific program and asks "how much". Distinction from policies/courses/tuition: the online module covers MSU's ONLINE program offerings via online.msstate.edu — distinct from the broader policy/course/tuition corpus. Online-specific tuition rates from controller.msstate.edu stay under get_msu_tuition_rate.
 7. Dining / food / meal-hour questions ("is Perry open?", "what time does Chick-fil-A close?", "where can I get coffee right now?", "list dining halls", "what's open at 9 pm") → get_msu_dining_hours for a specific venue (slug or fuzzy name), list_msu_dining_locations for browse/filter. Always surface corpus_built_at and the disclaimer - dining hours change frequently and the local-install snapshot may be days-months old. Distinct from meal-plan-cost questions which are not yet covered.
 8. Citation / "where did you get that?" / "is this true?" / trust questions, OR when the model has just composed an MSU-related answer and wants to attach receipts → citation_card(text=…). Pass the full answer text. Returns one card per claim with source_url + last_updated + confidence. Confidence='none' = could not verify; surface the claim as unverified, do NOT fabricate a URL.
 
