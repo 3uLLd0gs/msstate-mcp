@@ -34,7 +34,7 @@
     "zod-to-json-schema": "^3.23.5"
   },
   "devDependencies": {
-    "@types/node": "^20.14.0",
+    "@types/node": "^25.9.0",
     "@types/pdf-parse": "^1.1.4",
     "esbuild": "^0.28.0",
     "openai": "^6.37.0",
