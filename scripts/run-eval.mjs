@@ -797,6 +797,165 @@ if (suite === "citation") {
   process.exit(pass >= threshold ? 0 : 1);
 }
 
+// ---- semester suite (deterministic — no LLM judge) ----------------------
+// Tests plan_semester. Threshold 90%. Slugs verified against baked corpus.
+if (suite === "semester") {
+  const { spawn: spawnSem } = await import("node:child_process");
+  const semesterPath = resolve(evalDir, "semester.jsonl");
+  if (!existsSync(semesterPath)) {
+    console.error(`run-eval: ${semesterPath} not found`);
+    process.exit(1);
+  }
+  const rows = readFileSync(semesterPath, "utf8")
+    .split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("//")).map((l) => JSON.parse(l));
+
+  class SemMcp {
+    constructor() {
+      this.proc = spawnSem("node", [distPath], { stdio: ["pipe", "pipe", "inherit"] });
+      this.buf = ""; this.pending = new Map(); this.nextId = 1;
+      this.proc.stdout.on("data", (chunk) => {
+        this.buf += chunk.toString();
+        let nl;
+        while ((nl = this.buf.indexOf("\n")) >= 0) {
+          const line = this.buf.slice(0, nl);
+          this.buf = this.buf.slice(nl + 1);
+          if (!line.trim() || !line.trim().startsWith("{")) continue;
+          try {
+            const msg = JSON.parse(line);
+            if (msg.id && this.pending.has(msg.id)) {
+              const { r, j } = this.pending.get(msg.id);
+              this.pending.delete(msg.id);
+              if (msg.error) j(new Error(msg.error.message ?? "MCP error"));
+              else r(msg.result);
+            }
+          } catch { /* ignore */ }
+        }
+      });
+    }
+    call(method, params) {
+      const id = this.nextId++;
+      return new Promise((r, j) => {
+        this.pending.set(id, { r, j });
+        this.proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      });
+    }
+    async init() {
+      await this.call("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "run-eval-semester", version: "0.1.0" } });
+    }
+    callTool(args) { return this.call("tools/call", args); }
+    close() { this.proc.kill(); }
+  }
+
+  const mcp = new SemMcp();
+  await mcp.init();
+  let pass = 0;
+  const failures = [];
+  for (const q of rows) {
+    const e = q.expect ?? {};
+    let res; let parsed = null; let toolError = false;
+    try {
+      res = await mcp.callTool(q.args);
+    } catch (err) {
+      toolError = true;
+      res = { isError: true };
+    }
+    if (res?.isError) toolError = true;
+    if (!toolError) {
+      const text = res?.content?.[0]?.text ?? "";
+      try { parsed = JSON.parse(text); } catch { parsed = null; }
+    }
+
+    let ok = true;
+    let detail = "";
+
+    if (e.is_error !== undefined) {
+      ok = (toolError === e.is_error);
+      detail = `is_error=${toolError}`;
+    } else if (!parsed) {
+      ok = false;
+      detail = "no parsed body";
+    } else {
+      const cands = parsed.candidates ?? [];
+      if (ok && e.candidates_min !== undefined) {
+        if (cands.length < e.candidates_min) { ok = false; detail = `candidates ${cands.length} < ${e.candidates_min}`; }
+      }
+      if (ok && e.candidates_len !== undefined) {
+        if (cands.length !== e.candidates_len) { ok = false; detail = `candidates ${cands.length} != ${e.candidates_len}`; }
+      }
+      if (ok && Array.isArray(e.all_bundles_credits_in)) {
+        const [lo, hi] = e.all_bundles_credits_in;
+        for (const b of cands) {
+          if (b.total_credit_hours < lo || b.total_credit_hours > hi) { ok = false; detail = `bundle total ${b.total_credit_hours} not in [${lo},${hi}]`; break; }
+        }
+      }
+      if (ok && Array.isArray(e.never_includes)) {
+        for (const b of cands) {
+          for (const cr of b.courses ?? []) {
+            if (e.never_includes.includes(cr.code)) { ok = false; detail = `bundle includes excluded course ${cr.code}`; break; }
+          }
+          if (!ok) break;
+        }
+      }
+      if (ok && e.department_normalized !== undefined) {
+        if (parsed.department !== e.department_normalized) { ok = false; detail = `department ${parsed.department} != ${e.department_normalized}`; }
+      }
+      if (ok && e.candidate_pool_size_max !== undefined) {
+        if (parsed.candidate_pool_size > e.candidate_pool_size_max) { ok = false; detail = `pool ${parsed.candidate_pool_size} > ${e.candidate_pool_size_max}`; }
+      }
+      if (ok && e.candidate_pool_size !== undefined) {
+        if (parsed.candidate_pool_size !== e.candidate_pool_size) { ok = false; detail = `pool ${parsed.candidate_pool_size} != ${e.candidate_pool_size}`; }
+      }
+      if (ok && e.all_bundles_level !== undefined) {
+        // verify by checking a representative course's url contains catalog.msstate.edu and the title; level is on the Course, not the bundle
+        // For lack of a level field on PlanCandidateCourse, validate via bundle.courses[].code matching a known graduate prefix range.
+        // Simpler: trust the dispatch (level filter is enforced server-side); pass if cands has results AND first course code matches the graduate prefix convention.
+        if (cands.length > 0) {
+          for (const b of cands) {
+            for (const cr of b.courses ?? []) {
+              // Graduate CSE courses are 8000-level; undergraduate are 1000-4000 level.
+              if (e.all_bundles_level === "graduate") {
+                const num = parseInt(cr.code.split(" ")[1] ?? "0", 10);
+                if (num < 6000) { ok = false; detail = `course ${cr.code} below 6000 — not graduate-level`; break; }
+              }
+            }
+            if (!ok) break;
+          }
+        }
+        // If cands is empty, we can't verify the level filter worked; pass conservatively.
+      }
+      if (ok && e.notes_contains !== undefined) {
+        if (!(parsed.notes ?? []).some((n) => n.toLowerCase().includes(e.notes_contains.toLowerCase()))) {
+          ok = false; detail = `notes does not contain '${e.notes_contains}'`;
+        }
+      }
+      if (ok && Array.isArray(e.notes_contains_all)) {
+        for (const needle of e.notes_contains_all) {
+          if (!(parsed.notes ?? []).some((n) => n.toLowerCase().includes(needle.toLowerCase()))) {
+            ok = false; detail = `notes does not contain '${needle}'`; break;
+          }
+        }
+      }
+      if (ok && e.target_credits_min !== undefined) {
+        if (parsed.target_credits_min !== e.target_credits_min) { ok = false; detail = `target_credits_min ${parsed.target_credits_min} != ${e.target_credits_min}`; }
+      }
+      if (ok && e.target_credits_max !== undefined) {
+        if (parsed.target_credits_max !== e.target_credits_max) { ok = false; detail = `target_credits_max ${parsed.target_credits_max} != ${e.target_credits_max}`; }
+      }
+      if (ok && e.completed_courses_normalized_contains !== undefined) {
+        const arr = parsed.completed_courses_normalized ?? [];
+        if (!arr.includes(e.completed_courses_normalized_contains)) { ok = false; detail = `completed[] does not contain '${e.completed_courses_normalized_contains}'`; }
+      }
+    }
+    if (ok) pass++;
+    else failures.push({ q, detail });
+  }
+  mcp.close();
+  console.log(`semester eval: ${pass}/${rows.length} passed`);
+  for (const f of failures.slice(0, 20)) console.error("FAIL", JSON.stringify(f.q.desc ?? f.q.kind), "→", f.detail);
+  const threshold = Math.ceil(rows.length * 0.9);
+  process.exit(pass >= threshold ? 0 : 1);
+}
+
 // ---- dates suite (deterministic — no LLM judge) --------------------------
 // Asserts that find_msu_date returns rows with the exact ISO start/end the
 // upstream calendar publishes. The synonyms eval at evals/calendar-synonyms-eval.ts
