@@ -30,6 +30,54 @@ export const ONLINE_DISCLAIMER =
 
 export const MAX_QUERY_CHARS = 4096;
 
+/**
+ * Caller-supplied profile for match_online_program. Every field is optional;
+ * the matcher degrades gracefully when fields are absent (no field = no
+ * constraint on that axis). NEVER infer fields from training data — only
+ * use what the user provided.
+ */
+export interface MatcherProfile {
+  career_goal?: string;          // free-text, tokenized + matched against program name + short_description
+  level_preference?: DegreeLevel; // hard filter when present
+  budget_usd?: number;            // hard cap on estimated total-cost when credits + per_credit are known
+  time_budget_months?: number;    // soft signal (no per-program duration in corpus; lowers score for doctoral when small)
+  state?: string;                 // 2-letter postal code; cross-referenced with state-authorization info page
+  estimated_credits?: number;     // optional override; defaults to 30 (master/cert), 120 (bachelor) when null
+  include_application_fee?: boolean; // default false; flipping to true adds the per-program application fee to the estimate
+}
+
+export interface CostEstimate {
+  slug: string;
+  name: string;
+  credits_used: number;
+  credits_source: "user_supplied" | "default_master_30" | "default_bachelor_120" | "default_doctoral_60";
+  per_credit_usd: number | null;
+  instructional_fee_per_credit_usd: number | null;
+  application_fee_usd: number | null;
+  application_fee_included: boolean;
+  tuition_total_usd: number | null;
+  instructional_fee_total_usd: number | null;
+  total_usd: number | null;
+  notes: string[];                // e.g., "per_credit_usd missing — total cannot be computed"
+  source_url: string;
+  raw_prose: string;
+}
+
+export interface MatchedProgram {
+  slug: string;
+  name: string;
+  degree_level: DegreeLevel;
+  fit_score: number;              // 0–100, deterministic from scoreMatch
+  fit_reasons: string[];          // e.g., ["matches career_goal: 'data'", "within budget: ~$22,500 < $25,000"]
+  application_deadline_next: { term: string; date_text: string } | null;
+  primary_contact_name: string | null;
+  primary_contact_email: string | null;
+  estimated_total_usd: number | null;
+  estimated_total_credits: number | null;
+  state_authorization_flag: "ok" | "unknown" | "check_state_authorization_page";
+  url: string;
+}
+
 export type DegreeLevel =
   | "bachelor"
   | "master"
