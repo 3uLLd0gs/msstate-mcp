@@ -43,3 +43,15 @@
 {"kind":"staff_name_unique","desc":"staff: last name unique -> Clardy (1 match: Samantha Clardy)","args":{"name":"list_programs_by_staff","arguments":{"query":"Clardy"}},"expect":{"match_count":1,"first_match_display_name":"Samantha Clardy"}}
 {"kind":"staff_name_ambiguous","desc":"staff: ambiguous last name -> Smith (4 distinct staff in live index)","args":{"name":"list_programs_by_staff","arguments":{"query":"Smith"}},"expect":{"match_count":4}}
 {"kind":"staff_no_match","desc":"staff: no-match query, did_you_mean returns 0-3 names","args":{"name":"list_programs_by_staff","arguments":{"query":"NoSuchPersonZZZ"}},"expect":{"match_count":0,"did_you_mean_max":3}}
+{"kind":"program_match","desc":"business career → MBA top","args":{"name":"match_online_program","arguments":{"career_goal":"business","level_preference":"master"}},"expect":{"top_slug_one_of":["mba","bba"]}}
+{"kind":"program_match","desc":"cybersecurity master","args":{"name":"match_online_program","arguments":{"career_goal":"cyber security","level_preference":"master"}},"expect":{"top_slug_one_of":["mscyso","bas-cyber","cybersecurity"]}}
+{"kind":"program_match","desc":"data analytics master","args":{"name":"match_online_program","arguments":{"career_goal":"data analytics"}},"expect":{"matches_min":1}}
+{"kind":"program_match","desc":"engineering bachelor filter","args":{"name":"match_online_program","arguments":{"career_goal":"engineering","level_preference":"bachelor"}},"expect":{"all_match_level":"bachelor"}}
+{"kind":"program_match","desc":"empty profile returns >=1","args":{"name":"match_online_program","arguments":{}},"expect":{"matches_min":1}}
+{"kind":"program_match","desc":"state CA flagged","args":{"name":"match_online_program","arguments":{"career_goal":"business","state":"CA"}},"expect":{"state_flag_in":["unknown","check_state_authorization_page","ok"]}}
+{"kind":"program_cost","desc":"MBA cost default credits","args":{"name":"estimate_program_cost","arguments":{"slug":"mba"}},"expect":{"estimate_credits_used":30,"estimate_total_usd_min":1000}}
+{"kind":"program_cost","desc":"MBA cost with credits override","args":{"name":"estimate_program_cost","arguments":{"slug":"mba","credits":36}},"expect":{"estimate_credits_used":36}}
+{"kind":"program_cost","desc":"MBA cost include app fee","args":{"name":"estimate_program_cost","arguments":{"slug":"mba","include_application_fee":true}},"expect":{"estimate_application_fee_included":true}}
+{"kind":"program_cost","desc":"bachelor default credits = 120","args":{"name":"estimate_program_cost","arguments":{"slug":"bsee"}},"expect":{"estimate_credits_used":120}}
+{"kind":"program_cost","desc":"unknown slug returns not_found_reason","args":{"name":"estimate_program_cost","arguments":{"slug":"definitely-not-a-program"}},"expect":{"estimate_null":true,"not_found_reason_contains":"definitely-not-a-program"}}
+{"kind":"program_cost","desc":"doctoral default credits = 60","args":{"name":"estimate_program_cost","arguments":{"slug":"phcme"}},"expect":{"estimate_credits_used":60}}

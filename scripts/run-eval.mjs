@@ -494,7 +494,19 @@ if (suite === "online") {
     let parsed; try { parsed = JSON.parse(text); } catch { parsed = null; }
     let ok = false;
     const e = q.expect ?? {};
-    if (q.kind.startsWith("program_") || q.kind === "adversarial_program") {
+    if (q.kind === "program_match") {
+      const matches = parsed?.matches ?? [];
+      if (Array.isArray(e.top_slug_one_of)) ok = matches.length > 0 && e.top_slug_one_of.includes(matches[0]?.slug);
+      else if (e.top_slug_contains) ok = matches.length > 0 && typeof matches[0]?.slug === "string" && matches[0].slug.includes(e.top_slug_contains);
+      else if (e.matches_min !== undefined) ok = matches.length >= e.matches_min;
+      else if (e.all_match_level) ok = matches.length > 0 && matches.every((m) => m.degree_level === e.all_match_level);
+      else if (Array.isArray(e.state_flag_in)) ok = matches.length > 0 && matches.every((m) => e.state_flag_in.includes(m.state_authorization_flag));
+    } else if (q.kind === "program_cost") {
+      const est = parsed?.estimate;
+      if (e.estimate_null) ok = est === null && (!e.not_found_reason_contains || (parsed?.not_found_reason ?? "").includes(e.not_found_reason_contains));
+      else if (e.estimate_credits_used !== undefined) ok = est?.credits_used === e.estimate_credits_used && (e.estimate_total_usd_min === undefined || (est?.total_usd ?? 0) >= e.estimate_total_usd_min);
+      else if (e.estimate_application_fee_included !== undefined) ok = est?.application_fee_included === e.estimate_application_fee_included;
+    } else if (q.kind.startsWith("program_") || q.kind === "adversarial_program") {
       const m = parsed?.matched;
       if (e.matched_null) ok = m === null || m === undefined;
       else if (e.matched_slug) ok = m?.slug === e.matched_slug;
