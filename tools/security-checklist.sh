@@ -718,6 +718,53 @@ else
   note "FAIL" "DIN6 polite-scraping policy not visible in scraper.ts" 3
 fi
 
+# Citation card checks (CIT1-CIT3, added 2026-05-19). +8 pts total.
+
+# CIT1 (3 pts): citation router NEVER fetches at runtime, never spawns,
+# never reads env. Pure delegation across already-loaded corpora. (Note:
+# the policies branch calls getPolicy() which does I/O — this is delegation,
+# NOT a direct fetch/spawn/env-read inside the router/tool files.)
+CIT1_OK=0
+if [ -f msstate-policies/src/citation/router.ts ]; then
+  BAD=$(grep -nE 'fetch\(|require\(|process\.env|child_process|fs\.' \
+    msstate-policies/src/citation/router.ts \
+    msstate-policies/src/tools/citation_card.ts 2>/dev/null | wc -l | tr -d ' ')
+  [ "$BAD" = "0" ] && CIT1_OK=1
+fi
+if [ "$CIT1_OK" = "1" ]; then
+  score=$((score+3))
+  note "PASS" "CIT1 citation router/tool pure (no fetch/env/fs/child_process)" 3
+else
+  note "FAIL" "CIT1 citation router/tool made a forbidden runtime call" 3
+fi
+
+# CIT2 (3 pts): citation card always emits CITATION_DISCLAIMER on every
+# code path. Mechanically: the tool file must reference the constant AND
+# the constant must be defined in types.ts.
+CIT2_OK=0
+if grep -q 'CITATION_DISCLAIMER' msstate-policies/src/tools/citation_card.ts 2>/dev/null \
+   && grep -q 'CITATION_DISCLAIMER' msstate-policies/src/citation/types.ts 2>/dev/null; then
+  CIT2_OK=1
+fi
+if [ "$CIT2_OK" = "1" ]; then
+  score=$((score+3))
+  note "PASS" "CIT2 CITATION_DISCLAIMER referenced in tool + types" 3
+else
+  note "FAIL" "CIT2 CITATION_DISCLAIMER not referenced consistently" 3
+fi
+
+# CIT3 (2 pts): input length cap enforced via zod (max(MAX_INPUT_CHARS)).
+CIT3_OK=0
+if grep -q 'max(MAX_INPUT_CHARS)' msstate-policies/src/tools/citation_card.ts 2>/dev/null; then
+  CIT3_OK=1
+fi
+if [ "$CIT3_OK" = "1" ]; then
+  score=$((score+2))
+  note "PASS" "CIT3 input length cap enforced via zod" 2
+else
+  note "FAIL" "CIT3 input length cap missing" 2
+fi
+
 # =============================================================================
 # Telemetry / privacy checks (TEL1-TEL4, added 2026-05-18). +8 pts total.
 # See PRIVACY.md and worker/src/index.ts recordEvent / bucketCountry.
