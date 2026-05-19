@@ -24,7 +24,7 @@ After any change in scope, run `bash tools/security-checklist.sh | tail -1` and 
 6. **Online programs** — `online.msstate.edu` (added in v1.0.0)
 7. **Dining** — `dining.msstate.edu` → `msstatedining.mydininghub.com` (added in v1.1.0)
 
-Tool count: **26** (4 policy + 2 calendar + 3 course + 4 emergency + 4 tuition + 5 online + 2 dining + 1 citation + 1 health). Current version: **v1.2.3** (2026-05-19) — adds the `citation_card` meta-tool — splits an answer into sentence-level claims and returns one citation card per claim across all 7 corpora (policies, calendar, courses, emergency, tuition, online, dining); each card carries source_url + last_updated + confidence, with explicit confidence='none' for un-citable claims so the model surfaces them as unverified rather than fabricating a URL. v1.2.0 (2026-05-18) adds anonymous-aggregate Worker telemetry (Cloudflare Analytics Engine, k-anonymity enforced at query time) and the v1.2.1 development branch adds the `dates` + `adversarial` eval suites with deterministic suites CI-gated. v1.1.1 (2026-05-16) fixed the broken fuzzy program resolver (PROGRAM_STOP_WORDS + substring pre-stage), stripped analytics-injected HTML chrome from `tuition.raw_prose`, and added the `list_programs_by_staff` reverse-lookup tool. v1.1.0 (2026-05-14) added the dining module (2 tools, daily-refreshed corpus, Playwright modal-click for SPA-rendered hours, status_now computation in America/Chicago). v1.0.2 (2026-05-14) fixed the calendars stdio-bundle path + Worker fail-closed Content-Length. v1.0.1 (2026-05-13) fixed online parser admissions heading match + short_description sourcing. v1.0.0 (2026-05-13) shipped the online module (4 tools). v0.9.0 tightened the prereq parser (3 accuracy gaps closed, 2 new diagnostic fields, 3 new build-time ceilings). All sources serve a pre-baked corpus snapshot — zero runtime fetches to MSU at request time on the Worker; local stdio path live-scrapes policies. For project overview, architecture, decision history, eval methodology, and open issues, see [`docs/BUILD.md`](./docs/BUILD.md). Read it once before non-trivial work.
+Tool count: **28** (4 policy + 2 calendar + 3 course + 4 emergency + 4 tuition + 7 online + 2 dining + 1 citation + 1 health). Current version: **v1.2.4** (2026-05-19) adds two derived tools over the existing online corpus: `match_online_program` (profile → ranked program shortlist, scoring on career-goal keyword overlap, budget, time, state authorization) and `estimate_program_cost` (slug + credits → per-credit × credits + instructional fee + optional application fee, with degree-level credit defaults when credits aren't supplied). v1.2.3 (2026-05-19) — adds the `citation_card` meta-tool — splits an answer into sentence-level claims and returns one citation card per claim across all 7 corpora (policies, calendar, courses, emergency, tuition, online, dining); each card carries source_url + last_updated + confidence, with explicit confidence='none' for un-citable claims so the model surfaces them as unverified rather than fabricating a URL. v1.2.0 (2026-05-18) adds anonymous-aggregate Worker telemetry (Cloudflare Analytics Engine, k-anonymity enforced at query time) and the v1.2.1 development branch adds the `dates` + `adversarial` eval suites with deterministic suites CI-gated. v1.1.1 (2026-05-16) fixed the broken fuzzy program resolver (PROGRAM_STOP_WORDS + substring pre-stage), stripped analytics-injected HTML chrome from `tuition.raw_prose`, and added the `list_programs_by_staff` reverse-lookup tool. v1.1.0 (2026-05-14) added the dining module (2 tools, daily-refreshed corpus, Playwright modal-click for SPA-rendered hours, status_now computation in America/Chicago). v1.0.2 (2026-05-14) fixed the calendars stdio-bundle path + Worker fail-closed Content-Length. v1.0.1 (2026-05-13) fixed online parser admissions heading match + short_description sourcing. v1.0.0 (2026-05-13) shipped the online module (4 tools). v0.9.0 tightened the prereq parser (3 accuracy gaps closed, 2 new diagnostic fields, 3 new build-time ceilings). All sources serve a pre-baked corpus snapshot — zero runtime fetches to MSU at request time on the Worker; local stdio path live-scrapes policies. For project overview, architecture, decision history, eval methodology, and open issues, see [`docs/BUILD.md`](./docs/BUILD.md). Read it once before non-trivial work.
 
 The server ships in two surfaces from one bundle:
 - **Claude Code plugin** (`/plugin install msstate-policies@msstate-mcp`)
@@ -269,6 +269,25 @@ fields and explanatory `reason`. Caps: 8000 input chars, 40 claims processed.
 - CIT1 (3 pts): router + tool files contain no fetch/require/env/fs/child_process.
 - CIT2 (3 pts): CITATION_DISCLAIMER referenced in tool + types.
 - CIT3 (2 pts): input length cap enforced via zod max(MAX_INPUT_CHARS).
+
+### Corpus extension (2026-05-19) — program matcher (v1.2.4)
+
+Adds 2 derived tools (`match_online_program`, `estimate_program_cost`) over
+the existing online corpus. No new corpus sources. Tool count 26 -> 28.
+
+**`match_online_program(profile)`** — ranks up to 5 programs by deterministic
+keyword + budget + time + state scoring. Reads OnlineProgram[] + state-authorization
+info page only. Does NOT predict admission probability. Carries ONLINE_DISCLAIMER.
+
+**`estimate_program_cost(slug, credits?, include_application_fee?)`** —
+per_credit × credits + per-credit instructional fee. Required credits not
+published by every program; defaults applied per degree level (master/cert/
+specialist 30, bachelor 120, doctoral 60). Notes string surfaces every
+default applied.
+
+**Security checks updated:** ONL5 references 7 tool files (was 5). New ONL6
+(10 pts): matcher + estimator + helper never call fetch/require/env/fs/
+child_process. Score 300 -> 310.
 
 ### Corpus extension (2026-05-15) — online module fixes (v1.1.1)
 

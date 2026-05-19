@@ -1,6 +1,6 @@
 {
   "name": "msstate-policies",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "Mississippi State University Operating Policies via MCP. Unofficial.",
   "mcpServers": {
     "msstate-policies": {

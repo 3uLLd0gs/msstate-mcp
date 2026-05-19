@@ -48,7 +48,7 @@ msstate-mcp/                              # repo root = Claude Code marketplace
 │   ├── run-eval.mjs                      # MCP-driven eval harness
 │   └── sync-version.mjs                  # syncs package.json -> plugin.json
 ├── worker/                               # Cloudflare Worker variant (HTTP/JSON-RPC)
-│   ├── src/index.ts                      # MCP-over-HTTP, all 26 tools, BM25 only
+│   ├── src/index.ts                      # MCP-over-HTTP, all 28 tools, BM25 only
 │   ├── corpus.json                       # pre-extracted policies + academic_calendar block
 │   ├── wrangler.toml                     # Cloudflare deploy config
 │   ├── package.json                      # devDeps: wrangler, workers-types
@@ -72,7 +72,7 @@ msstate-mcp/                              # repo root = Claude Code marketplace
     │   ├── index.js                      # COMMITTED bundle (~14 MB)
     │   └── embeddings.json               # COMMITTED embeddings (~24 MB)
     └── src/
-        ├── index.ts                      # MCP server entry (stdio) — registers all 26 tools
+        ├── index.ts                      # MCP server entry (stdio) — registers all 28 tools
         ├── log.ts                        # stderr-only structured logger
         ├── types.ts                      # PolicyEntry, PolicyDocument, PolicyIndex, HealthState
         ├── cache.ts                      # TTLCache<T> (mem + opt-in disk)
@@ -932,3 +932,26 @@ Security score 292 -> 300 (+8 pts) via CIT1-CIT3.
 Eval: 15-case suite (`eval/citation.jsonl`) gated at 90% in
 `node scripts/run-eval.mjs --suite citation` (current pass rate 15/15).
 Tool count 25 -> 26.
+
+### v1.2.4 (2026-05-19) — Program matcher + cost estimator
+
+Adds match_online_program (profile → ranked shortlist) and estimate_program_cost
+(slug + credits → total-cost rollup) over the existing online corpus. Both are
+pure-derived — no new scraping. Tool count 26 -> 28. Online suite expanded to
+57 cases (6 program_match + 6 program_cost added).
+
+match_online_program scoring (deterministic, no LLM): career_goal keyword
+overlap (0-60 cap), budget (bidirectional -30..+30 — heavily over-budget
+programs are penalised below zero on this component; final fit_score clamps
+to [0, 100]), time (-10..+10 depending on level fit), state-auth flag from
+the state-authorization info page. Hard filter on level_preference; soft on
+everything else. Returns up to 5 matches.
+
+estimate_program_cost applies degree-level credit defaults when credits
+omitted (master/cert/specialist 30, bachelor 120, doctoral 60) and surfaces
+every default via the notes array. Out-of-state caveat: MSU Online tuition
+is largely flat-rate.
+
+Worker mirror inlines rankPrograms / estimateCost / parseStateAuthorization
+(separate bundle from stdio). ONL5 file count bumped 5 -> 7; new ONL6 (10
+pts) gates matcher/estimator/helper purity. Security score 300 -> 310.
