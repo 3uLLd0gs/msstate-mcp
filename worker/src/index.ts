@@ -1412,7 +1412,7 @@ const CIT_MONTH_DAY_RE = /\b(January|February|March|April|May|June|July|August|S
 
 const CIT_EMERGENCY_TERMS = new Set([
   "tornado", "fire", "shooter", "active shooter", "lockdown", "evacuation",
-  "refuge area", "weather warning", "emergency", "msu pd", "911",
+  "refuge", "weather warning", "emergency", "msu pd", "911",
 ]);
 const CIT_TUITION_TERMS = new Set([
   "tuition", "fee", "fees", "credit hour", "per credit", "in-state", "out-of-state",
