@@ -48,6 +48,8 @@ import { get_online_program } from "./tools/get_online_program.js";
 import { get_online_admissions_process } from "./tools/get_online_admissions_process.js";
 import { find_online_info } from "./tools/find_online_info.js";
 import { list_programs_by_staff } from "./tools/list_programs_by_staff.js";
+import { match_online_program } from "./tools/match_online_program.js";
+import { estimate_program_cost } from "./tools/estimate_program_cost.js";
 import { citation_card } from "./tools/citation_card.js";
 import { setOnlineCorpus } from "./online/corpus.js";
 import type { OnlineCorpus } from "./online/types.js";
@@ -80,7 +82,7 @@ Routing rules — pick the tool whose CATEGORY matches the question. If your fir
 3. Course questions ("what's the prereq for...", "what does X unlock?", "find a class about Y") → search_msu_courses, get_msu_course, get_msu_course_graph.
 4. Emergency / safety questions (tornado, fire, active shooter, refuge area, MSU PD) → get_msu_emergency_guideline, find_msu_severe_weather_refuge, get_msu_emergency_contacts. For life-threatening situations, ALWAYS lead with "Call 911 now."
 5. Tuition / fee / cost questions ("how much is tuition", "college fees", "DVM cost") → get_msu_tuition_rate (structured: campus + level + residency), get_msu_enrollment_fees, find_msu_tuition_faq, list_msu_tuition_campuses.
-6. Online-program / online-admissions / online-student-services questions ("does MSU have an online MBA?", "how do I apply to MSU online?", "who's the advisor for the online psychology program?", "what's the application deadline for the online MS in Cybersecurity?", "does MSU online operate in my state?", "military assistance for MSU online") → list_online_programs / get_online_program / get_online_admissions_process / find_online_info, picked by question shape. Distinction from policies/courses/tuition: the online module covers MSU's ONLINE program offerings via online.msstate.edu — distinct from the broader policy/course/tuition corpus. Online-specific tuition rates from controller.msstate.edu stay under get_msu_tuition_rate.
+6. Online-program / online-admissions / online-student-services questions ("does MSU have an online MBA?", "how do I apply to MSU online?", "who's the advisor for the online psychology program?", "what's the application deadline for the online MS in Cybersecurity?", "does MSU online operate in my state?", "military assistance for MSU online", "which online program fits me?", "how much does an online master's cost?") → list_online_programs / get_online_program / get_online_admissions_process / find_online_info / list_programs_by_staff / match_online_program / estimate_program_cost, picked by question shape. Use match_online_program when the user describes a profile (career goal, budget, level, state) and wants a shortlist; use estimate_program_cost when the user names a specific program and asks "how much". Distinction from policies/courses/tuition: the online module covers MSU's ONLINE program offerings via online.msstate.edu — distinct from the broader policy/course/tuition corpus. Online-specific tuition rates from controller.msstate.edu stay under get_msu_tuition_rate.
 7. Dining / food / meal-hour questions ("is Perry open?", "what time does Chick-fil-A close?", "where can I get coffee right now?", "list dining halls", "what's open at 9 pm") → get_msu_dining_hours for a specific venue (slug or fuzzy name), list_msu_dining_locations for browse/filter. Always surface corpus_built_at and the disclaimer - dining hours change frequently and the local-install snapshot may be days-months old. Distinct from meal-plan-cost questions which are not yet covered.
 8. Citation / "where did you get that?" / "is this true?" / trust questions, OR when the model has just composed an MSU-related answer and wants to attach receipts → citation_card(text=…). Pass the full answer text. Returns one card per claim with source_url + last_updated + confidence. Confidence='none' = could not verify; surface the claim as unverified, do NOT fabricate a URL.
 
@@ -114,6 +116,8 @@ const TOOLS = [
   get_online_admissions_process,
   find_online_info,
   list_programs_by_staff,
+  match_online_program,
+  estimate_program_cost,
   list_msu_dining_locations,
   get_msu_dining_hours,
   citation_card,
