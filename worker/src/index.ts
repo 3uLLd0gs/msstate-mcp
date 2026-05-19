@@ -1236,6 +1236,14 @@ const DINING_DISCLAIMER =
   "plugin install, this snapshot may be days-months old - verify against " +
   "https://dining.msstate.edu/ before going to a closed venue.";
 
+const CITATION_DISCLAIMER =
+  "Citations are matched against MSU's published corpora. A 'no_citation_found' result means we couldn't trace the claim to an MSU source — treat that claim as unverified.";
+
+const MAX_CITATION_INPUT_CHARS = 8000;
+const MAX_CITATION_CLAIMS = 40;
+const MAX_CITATION_CLAIM_CHARS = 800;
+const CITATION_SNIPPET_MAX = 240;
+
 function dnFilterLocations(req: { name_substring?: string; limit?: number; offset?: number }) {
   const locations = DINING?.locations ?? [];
   let filtered = locations;
@@ -1352,6 +1360,250 @@ function snippetFor(text: string, query: string, windowChars = 240): string {
     }
   }
   return text.slice(0, windowChars).replace(/\s+/g, " ").trim() + (text.length > windowChars ? "…" : "");
+}
+
+// ---- Citation router (inline mirror of src/citation/router.ts) -------------
+// Re-implemented here because the Worker is a separate bundle from
+// msstate-policies/. Keep the field/accessor names in this block aligned with
+// the worker's own corpus accessors (POLICIES/CAL_ROWS/COURSES/EMERGENCY/
+// TUITION/ONLINE/DINING and the bm25Search* / search* functions). When
+// updating the stdio router (src/citation/router.ts), mirror the changes here.
+
+type CitationDomain =
+  | "policies"
+  | "calendar"
+  | "courses"
+  | "emergency"
+  | "tuition"
+  | "online"
+  | "dining";
+
+const CITATION_ALL_DOMAINS: readonly CitationDomain[] = [
+  "policies", "calendar", "courses", "emergency", "tuition", "online", "dining",
+];
+
+interface CitationCard {
+  claim: string;
+  domain: CitationDomain | null;
+  source_url: string | null;
+  source_title: string | null;
+  last_updated: string | null;
+  snippet: string | null;
+  confidence: "high" | "medium" | "low" | "none";
+  reason: string;
+}
+
+function citSplitClaims(text: string): string[] {
+  if (!text || typeof text !== "string") return [];
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length === 0) return [];
+  const parts = normalized
+    .split(/(?<=[.!?])\s+(?=[A-Z0-9$])/)
+    .map((s) => s.replace(/[.!?]+$/, "").trim())
+    .filter((s) => s.length > 0);
+  const truncated = parts.map((s) => (s.length > MAX_CITATION_CLAIM_CHARS ? s.slice(0, MAX_CITATION_CLAIM_CHARS) : s));
+  return truncated.slice(0, MAX_CITATION_CLAIMS);
+}
+
+const CIT_COURSE_CODE_RE = /\b[A-Z]{3,4}\s\d{4}\b/;
+const CIT_POLICY_OP_RE = /\b(OP|operating policy)\s*\d{2}\.\d{2,3}\b/i;
+const CIT_DOLLAR_RE = /\$\s?\d/;
+const CIT_MONTH_DAY_RE = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}\b/i;
+
+const CIT_EMERGENCY_TERMS = new Set([
+  "tornado", "fire", "shooter", "active shooter", "lockdown", "evacuation",
+  "refuge area", "weather warning", "emergency", "msu pd", "911",
+]);
+const CIT_TUITION_TERMS = new Set([
+  "tuition", "fee", "fees", "credit hour", "per credit", "in-state", "out-of-state",
+  "resident", "non-resident", "scholarship", "billing",
+]);
+const CIT_ONLINE_TERMS = new Set([
+  "online program", "online mba", "online bachelor", "online master",
+  "online certificate", "online doctoral", "online application", "online deadline",
+  "msu online",
+]);
+const CIT_DINING_TERMS = new Set([
+  "dining", "cafeteria", "restaurant", "perry cafeteria", "chick-fil-a", "starbucks",
+  "lunch", "breakfast", "dinner", "meal plan",
+]);
+const CIT_CALENDAR_TERMS = new Set([
+  "registration", "drop deadline", "add deadline", "spring break", "fall break",
+  "thanksgiving", "winter break", "commencement", "finals", "exam schedule",
+  "holiday", "first day of class", "last day of class",
+]);
+
+function citLowerWords(s: string): Set<string> {
+  return new Set(
+    s.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 1),
+  );
+}
+
+function citAnyTermMatch(claim: string, terms: Set<string>): boolean {
+  const lower = claim.toLowerCase();
+  for (const t of terms) {
+    if (t.includes(" ") ? lower.includes(t) : citLowerWords(claim).has(t)) return true;
+  }
+  return false;
+}
+
+function citRouteClaim(claim: string, hints: readonly string[] | undefined): CitationDomain | null {
+  if (hints && hints.length > 0) {
+    const valid = hints.filter((h): h is CitationDomain =>
+      (CITATION_ALL_DOMAINS as readonly string[]).includes(h),
+    );
+    if (valid.length > 0) return valid[0];
+  }
+  if (CIT_POLICY_OP_RE.test(claim)) return "policies";
+  if (CIT_COURSE_CODE_RE.test(claim)) return "courses";
+  if (citAnyTermMatch(claim, CIT_EMERGENCY_TERMS)) return "emergency";
+  if (citAnyTermMatch(claim, CIT_ONLINE_TERMS)) return "online";
+  if (CIT_DOLLAR_RE.test(claim) && citAnyTermMatch(claim, CIT_TUITION_TERMS)) return "tuition";
+  if (CIT_MONTH_DAY_RE.test(claim) || citAnyTermMatch(claim, CIT_CALENDAR_TERMS)) return "calendar";
+  if (citAnyTermMatch(claim, CIT_DINING_TERMS)) return "dining";
+  if (citAnyTermMatch(claim, CIT_TUITION_TERMS)) return "tuition";
+  return null;
+}
+
+function citSnippet(text: string): string {
+  if (!text) return "";
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  return cleaned.length > CITATION_SNIPPET_MAX ? cleaned.slice(0, CITATION_SNIPPET_MAX) + "…" : cleaned;
+}
+
+function citNone(claim: string, domain: CitationDomain | null, reason: string): CitationCard {
+  return {
+    claim, domain, source_url: null, source_title: null, last_updated: null,
+    snippet: null, confidence: "none", reason,
+  };
+}
+
+function citSearchOnline(claim: string): CitationCard {
+  if (!ONLINE) return citNone(claim, "online", "online corpus not loaded");
+  const hits = onlSearchInfo(claim, 1, "all");
+  if (hits.length === 0) return citNone(claim, "online", "no BM25 hit in info pages");
+  const top = hits[0];
+  const conf = top.score > 5 ? "high" : top.score > 2 ? "medium" : "low";
+  return {
+    claim, domain: "online",
+    source_url: top.row.url, source_title: top.row.title,
+    last_updated: ONLINE.builtAt, snippet: citSnippet(top.row.body_markdown),
+    confidence: conf, reason: `BM25 match in info_pages (score=${top.score.toFixed(2)})`,
+  };
+}
+
+function citSearchPolicies(claim: string): CitationCard {
+  const opMatch = claim.match(/\b(?:OP|operating policy)\s*(\d{2}\.\d{2,3})\b/i);
+  if (opMatch) {
+    const policy = findPolicy(opMatch[1]);
+    if (policy) {
+      return {
+        claim, domain: "policies", source_url: policy.landingUrl,
+        source_title: policy.title,
+        last_updated: policy.effectiveDate ?? null,
+        snippet: citSnippet(policy.text ?? ""), confidence: "high",
+        reason: `direct OP reference to ${opMatch[1]}`,
+      };
+    }
+    return citNone(claim, "policies", `OP ${opMatch[1]} not in worker corpus snapshot`);
+  }
+  const hits = bm25Search(claim, 1);
+  if (hits.length === 0) return citNone(claim, "policies", "no policy index hit");
+  const top = hits[0];
+  return {
+    claim, domain: "policies", source_url: top.policy.landingUrl,
+    source_title: top.policy.title,
+    last_updated: top.policy.effectiveDate ?? null,
+    snippet: citSnippet(top.policy.text ?? ""), confidence: "medium",
+    reason: `policy index BM25 match (score=${top.score.toFixed(2)})`,
+  };
+}
+
+function citSearchCalendar(claim: string): CitationCard {
+  const hits = bm25SearchCalendars(claim, 1);
+  if (!hits || hits.length === 0) return citNone(claim, "calendar", "no calendar row matched");
+  const row = hits[0].row;
+  const dateText = row.end && row.end !== row.start ? `${row.start} → ${row.end}` : row.start;
+  return {
+    claim, domain: "calendar", source_url: row.source_url ?? null,
+    source_title: row.event ?? row.source,
+    last_updated: row.retrieved_at ?? null,
+    snippet: citSnippet(`${row.event} (${dateText})${row.description ? ": " + row.description : ""}`),
+    confidence: "high",
+    reason: `calendar match (source=${row.source}, score=${hits[0].score.toFixed(2)})`,
+  };
+}
+
+function citSearchCourses(claim: string): CitationCard {
+  const m = claim.match(/\b([A-Z]{3,4})\s(\d{4})\b/);
+  if (!m) return citNone(claim, "courses", "no course-code regex match in claim");
+  const code = `${m[1]} ${m[2]}`;
+  const course = getCourse(code);
+  if (!course) return citNone(claim, "courses", `course ${code} not in catalog corpus`);
+  return {
+    claim, domain: "courses", source_url: course.source_url,
+    source_title: `${course.code}: ${course.title}`,
+    last_updated: COURSES?.scraped_at ?? null,
+    snippet: citSnippet(course.description),
+    confidence: "high", reason: `exact course-code match on ${code}`,
+  };
+}
+
+function citSearchEmergency(claim: string): CitationCard {
+  if (!EMERGENCY) return citNone(claim, "emergency", "emergency corpus not loaded");
+  const claimLower = claim.toLowerCase();
+  const guideline = EMERGENCY.guidelines.find((g) => claimLower.includes(g.slug.replace(/-/g, " ")));
+  if (guideline) {
+    return {
+      claim, domain: "emergency", source_url: guideline.url, source_title: guideline.title,
+      last_updated: EMERGENCY.builtAt ?? null,
+      snippet: citSnippet(guideline.body_markdown), confidence: "high",
+      reason: `slug match in emergency guideline (${guideline.slug})`,
+    };
+  }
+  return citNone(claim, "emergency", "no slug match in emergency guidelines");
+}
+
+function citSearchTuition(claim: string): CitationCard {
+  if (!TUITION) return citNone(claim, "tuition", "tuition corpus not loaded");
+  const tokens = claim.toLowerCase().split(/\W+/).filter((t) => t.length > 4);
+  const faq = TUITION.faq_rows.find((r) =>
+    tokens.some((t) => r.question.toLowerCase().includes(t)),
+  );
+  if (faq) {
+    return {
+      claim, domain: "tuition", source_url: faq.source_url, source_title: faq.question,
+      last_updated: TUITION.builtAt ?? null,
+      snippet: citSnippet(faq.answer), confidence: "medium",
+      reason: "tuition FAQ token-overlap match",
+    };
+  }
+  return citNone(claim, "tuition", "no tuition FAQ token match");
+}
+
+function citSearchDining(claim: string): CitationCard {
+  if (!DINING) return citNone(claim, "dining", "dining corpus not loaded");
+  const claimLower = claim.toLowerCase();
+  const loc = DINING.locations.find((l) => claimLower.includes(l.name.toLowerCase()));
+  if (!loc) return citNone(claim, "dining", "no dining-location name found in claim");
+  return {
+    claim, domain: "dining", source_url: loc.url, source_title: loc.name,
+    last_updated: DINING.builtAt ?? null,
+    snippet: citSnippet(loc.hours_raw_text ?? ""), confidence: "high",
+    reason: `dining-location name match (${loc.slug})`,
+  };
+}
+
+function citSearchInDomain(claim: string, domain: CitationDomain): CitationCard {
+  switch (domain) {
+    case "online":    return citSearchOnline(claim);
+    case "policies":  return citSearchPolicies(claim);
+    case "calendar":  return citSearchCalendar(claim);
+    case "courses":   return citSearchCourses(claim);
+    case "emergency": return citSearchEmergency(claim);
+    case "tuition":   return citSearchTuition(claim);
+    case "dining":    return citSearchDining(claim);
+  }
 }
 
 // ---- MCP tool definitions ---------------------------------------------------
@@ -1679,6 +1931,30 @@ const TOOLS = [
         slug: { type: "string", description: "URL-tail slug, max 4096 chars" },
         name_query: { type: "string", description: "Fuzzy name query, max 4096 chars" },
       },
+    },
+  },
+  {
+    name: "citation_card",
+    description:
+      "Trust-surface meta-tool. Given an answer `text`, splits it into sentence-level claims and returns one citation card per claim — {claim, domain, source_url, source_title, last_updated, snippet, confidence}. " +
+      "When the model produces an answer about MSU, call this tool with the answer text to attach receipts. Each card cites the canonical MSU page the claim came from, the last-updated timestamp from the corpus snapshot, and a confidence level. " +
+      "`domain_hints` (optional) is an ordered list of domain preferences ('policies', 'calendar', 'courses', 'emergency', 'tuition', 'online', 'dining') applied to all claims, taking priority over the keyword router. " +
+      "Cards with confidence='none' mean we could not trace the claim to an MSU source — present those claims as unverified to the user. NEVER fabricate a citation for a 'none' card. " +
+      "Caps: input up to 8000 chars, up to 40 claims processed per call (the rest is truncated and flagged via claims_truncated).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "Answer text to split into claims; max 8000 chars." },
+        domain_hints: {
+          type: "array",
+          description: "Optional ordered list of domain preferences applied before the router.",
+          items: {
+            type: "string",
+            enum: ["policies", "calendar", "courses", "emergency", "tuition", "online", "dining"],
+          },
+        },
+      },
+      required: ["text"],
     },
   },
   {
@@ -2362,6 +2638,46 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Mc
         source_url: matched?.url ?? null,
       });
     }
+    case "citation_card": {
+      const text = typeof args?.text === "string" ? args.text : "";
+      if (text.length === 0) return errorContent("citation_card requires a non-empty `text` argument.");
+      if (text.length > MAX_CITATION_INPUT_CHARS) {
+        return errorContent(`text too long: ${text.length} chars (max ${MAX_CITATION_INPUT_CHARS}). Trim the input.`);
+      }
+      const hintsRaw = args?.domain_hints;
+      let hints: string[] | undefined;
+      if (Array.isArray(hintsRaw)) {
+        hints = hintsRaw.filter((h): h is string => typeof h === "string");
+        const bad = hints.find((h) => !(CITATION_ALL_DOMAINS as readonly string[]).includes(h));
+        if (bad) return errorContent(`citation_card: unknown domain_hint '${bad}'. Valid: ${CITATION_ALL_DOMAINS.join(", ")}.`);
+      }
+      const rawClaims = citSplitClaims(text);
+      const truncated = rawClaims.length >= MAX_CITATION_CLAIMS;
+      const cards: CitationCard[] = [];
+      const counts: Record<string, number> = {
+        policies: 0, calendar: 0, courses: 0, emergency: 0,
+        tuition: 0, online: 0, dining: 0, none: 0,
+      };
+      for (const claim of rawClaims) {
+        const domain = citRouteClaim(claim, hints);
+        const card: CitationCard = domain
+          ? citSearchInDomain(claim, domain)
+          : {
+              claim, domain: null, source_url: null, source_title: null,
+              last_updated: null, snippet: null, confidence: "none",
+              reason: "router could not assign a domain",
+            };
+        cards.push(card);
+        counts[card.domain ?? "none"]++;
+      }
+      return jsonContent({
+        disclaimer: CITATION_DISCLAIMER,
+        cards,
+        claims_processed: cards.length,
+        claims_truncated: truncated,
+        by_domain_counts: counts,
+      });
+    }
     case "health_check": {
       return jsonContent({
         runtime: "cloudflare-workers",
@@ -2433,6 +2749,7 @@ Routing rules — pick the tool whose CATEGORY matches the question. If your fir
 5. Tuition / fee / cost questions ("how much is tuition", "college fees", "DVM cost") → get_msu_tuition_rate (structured: campus + level + residency), get_msu_enrollment_fees, find_msu_tuition_faq, list_msu_tuition_campuses.
 6. Online-program / online-admissions / online-student-services questions ("does MSU have an online MBA?", "how do I apply to MSU online?", "who's the advisor for the online psychology program?", "what's the application deadline for the online MS in Cybersecurity?", "does MSU online operate in my state?", "military assistance for MSU online") → list_online_programs / get_online_program / get_online_admissions_process / find_online_info, picked by question shape. Distinction from policies/courses/tuition: the online module covers MSU's ONLINE program offerings via online.msstate.edu — distinct from the broader policy/course/tuition corpus. Online-specific tuition rates from controller.msstate.edu stay under get_msu_tuition_rate.
 7. Dining / food / meal-hour questions ("is Perry open?", "what time does Chick-fil-A close?", "where can I get coffee right now?", "list dining halls", "what's open at 9 pm") -> get_msu_dining_hours for a specific venue (slug or fuzzy name), list_msu_dining_locations for browse/filter. Always surface corpus_built_at and the disclaimer - dining hours change frequently and the local-install snapshot may be days-months old. Distinct from meal-plan-cost questions which are not yet covered.
+8. Citation / "where did you get that?" / "is this true?" / trust questions, OR when the model has just composed an MSU-related answer and wants to attach receipts → citation_card(text=…). Pass the full answer text. Returns one card per claim with source_url + last_updated + confidence. Confidence='none' = could not verify; surface the claim as unverified, do NOT fabricate a URL.
 
 Anti-hallucination rules — load-bearing:
 - Use ONLY data returned by the tools. Never substitute training-data knowledge of "what universities usually have" for actual tool results.
