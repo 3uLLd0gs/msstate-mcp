@@ -50,7 +50,11 @@ export interface CostEstimate {
   slug: string;
   name: string;
   credits_used: number;
-  credits_source: "user_supplied" | "default_master_30" | "default_bachelor_120" | "default_doctoral_60";
+  // credits_source: distinguishes user-supplied from the per-level default. Specialist
+  // and endorsement programs are intentionally aliased to default_master_30 — these
+  // typically run ~30 credit hours and MSU Online does not separately publish their
+  // standard length. estimateCost in matcher.ts treats them as 30-credit master-like.
+  credits_source: "user_supplied" | "default_master_30" | "default_bachelor_120" | "default_doctoral_60" | "default_certificate_30";
   per_credit_usd: number | null;
   instructional_fee_per_credit_usd: number | null;
   application_fee_usd: number | null;
@@ -69,7 +73,7 @@ export interface MatchedProgram {
   degree_level: DegreeLevel;
   fit_score: number;              // 0–100, deterministic from scoreMatch
   fit_reasons: string[];          // e.g., ["matches career_goal: 'data'", "within budget: ~$22,500 < $25,000"]
-  application_deadline_next: { term: string; date_text: string } | null;
+  application_deadline_next: OnlineApplicationDeadline | null;
   primary_contact_name: string | null;
   primary_contact_email: string | null;
   estimated_total_usd: number | null;
