@@ -29,6 +29,7 @@ import { indexCalendarRows } from "./calendars/search.js";
 import { search_msu_courses } from "./tools/search_msu_courses.js";
 import { get_msu_course } from "./tools/get_msu_course.js";
 import { get_msu_course_graph } from "./tools/get_msu_course_graph.js";
+import { plan_semester } from "./tools/plan_semester.js";
 import { setCourseCorpus } from "./courses/corpus.js";
 import type { CourseCorpus } from "./courses/types.js";
 import { get_msu_emergency_guideline } from "./tools/get_msu_emergency_guideline.js";
@@ -79,7 +80,7 @@ Routing rules — pick the tool whose CATEGORY matches the question. If your fir
 
 1. Policy / rule questions ("what's the policy on...", "is X allowed?", "what's the rule for...") → chain_find_relevant_policies with k=5.
 2. Date / deadline / holiday / closure / break / exam-schedule questions ("when is...", "what days off", "spring break", "staff holidays", "fall 2026 exams") → find_msu_date. Use get_msu_calendar with source="university_holidays" for the full holiday list. If the user does NOT specify a year, present ALL year-versions returned.
-3. Course questions ("what's the prereq for...", "what does X unlock?", "find a class about Y") → search_msu_courses, get_msu_course, get_msu_course_graph.
+3. Course questions ("what's the prereq for...", "what does X unlock?", "find a class about Y", "what should I take next semester in CSE?") → search_msu_courses, get_msu_course, get_msu_course_graph, plan_semester. Use plan_semester when the user gives a department + completed courses and wants a candidate schedule. Always surface the non-goals from plan_semester.notes (no live sections, no degree-audit, no admission prediction).
 4. Emergency / safety questions (tornado, fire, active shooter, refuge area, MSU PD) → get_msu_emergency_guideline, find_msu_severe_weather_refuge, get_msu_emergency_contacts. For life-threatening situations, ALWAYS lead with "Call 911 now."
 5. Tuition / fee / cost questions ("how much is tuition", "college fees", "DVM cost") → get_msu_tuition_rate (structured: campus + level + residency), get_msu_enrollment_fees, find_msu_tuition_faq, list_msu_tuition_campuses.
 6. Online-program / online-admissions / online-student-services questions ("does MSU have an online MBA?", "how do I apply to MSU online?", "who's the advisor for the online psychology program?", "what's the application deadline for the online MS in Cybersecurity?", "does MSU online operate in my state?", "military assistance for MSU online", "which online program fits me?", "how much does an online master's cost?") → list_online_programs / get_online_program / get_online_admissions_process / find_online_info / list_programs_by_staff / match_online_program / estimate_program_cost, picked by question shape. Use match_online_program when the user describes a profile (career goal, budget, level, state) and wants a shortlist; use estimate_program_cost when the user names a specific program and asks "how much". Distinction from policies/courses/tuition: the online module covers MSU's ONLINE program offerings via online.msstate.edu — distinct from the broader policy/course/tuition corpus. Online-specific tuition rates from controller.msstate.edu stay under get_msu_tuition_rate.
@@ -103,6 +104,7 @@ const TOOLS = [
   search_msu_courses,
   get_msu_course,
   get_msu_course_graph,
+  plan_semester,
   get_msu_emergency_guideline,
   list_msu_emergency_types,
   find_msu_severe_weather_refuge,
