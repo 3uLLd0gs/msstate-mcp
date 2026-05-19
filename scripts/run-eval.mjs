@@ -650,6 +650,141 @@ if (suite === "dining") {
   process.exit(pass >= threshold ? 0 : 1);
 }
 
+// ---- citation suite (deterministic — no LLM judge) ----------------------
+// Tests citation_card across all 7 corpora. Some assertions are loose
+// because the deterministic suite must work even when a particular corpus
+// branch returns "none" (e.g., tuition FAQ might not match a token in an
+// adversarial query). The eval cases were curated to have clear top-domain
+// expectations against the baked corpus snapshot.
+if (suite === "citation") {
+  const { spawn: spawnCit } = await import("node:child_process");
+  const citationPath = resolve(evalDir, "citation.jsonl");
+  if (!existsSync(citationPath)) {
+    console.error(`run-eval: ${citationPath} not found`);
+    process.exit(1);
+  }
+  const rows = readFileSync(citationPath, "utf8")
+    .split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("//")).map((l) => JSON.parse(l));
+
+  class CitMcp {
+    constructor() {
+      this.proc = spawnCit("node", [distPath], { stdio: ["pipe", "pipe", "inherit"] });
+      this.buf = ""; this.pending = new Map(); this.nextId = 1;
+      this.proc.stdout.on("data", (chunk) => {
+        this.buf += chunk.toString();
+        let nl;
+        while ((nl = this.buf.indexOf("\n")) >= 0) {
+          const line = this.buf.slice(0, nl);
+          this.buf = this.buf.slice(nl + 1);
+          if (!line.trim() || !line.trim().startsWith("{")) continue;
+          try {
+            const msg = JSON.parse(line);
+            if (msg.id && this.pending.has(msg.id)) {
+              const { r, j } = this.pending.get(msg.id);
+              this.pending.delete(msg.id);
+              if (msg.error) j(new Error(msg.error.message ?? "MCP error"));
+              else r(msg.result);
+            }
+          } catch { /* ignore */ }
+        }
+      });
+    }
+    call(method, params) {
+      const id = this.nextId++;
+      return new Promise((r, j) => {
+        this.pending.set(id, { r, j });
+        this.proc.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      });
+    }
+    async init() {
+      await this.call("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "run-eval-citation", version: "0.1.0" } });
+    }
+    callTool(args) { return this.call("tools/call", args); }
+    close() { this.proc.kill(); }
+  }
+
+  // Map a card.domain (which may be null) to the comparison key used in
+  // expected.top_domain.
+  const domainKey = (d) => d ?? "none";
+
+  const mcp = new CitMcp();
+  await mcp.init();
+  let pass = 0;
+  const failures = [];
+  for (const q of rows) {
+    const e = q.expect ?? {};
+    let res; let parsed = null; let toolError = false;
+    try {
+      res = await mcp.callTool(q.args);
+    } catch (err) {
+      // Hard JSON-RPC error (rare — most MCP errors come back as isError content).
+      toolError = true;
+      res = { isError: true, content: [{ type: "text", text: String(err.message) }] };
+    }
+    // citation_card wraps errors as isError responses, NOT JSON-RPC errors.
+    if (res?.isError) toolError = true;
+    if (!toolError) {
+      const text = res?.content?.[0]?.text ?? "";
+      try { parsed = JSON.parse(text); } catch { parsed = null; }
+    }
+
+    let ok = true;
+    let detail = "";
+
+    if (e.is_error !== undefined) {
+      ok = (toolError === e.is_error);
+      detail = `is_error=${toolError}`;
+    } else {
+      // The remaining assertions all require a parsed JSON body.
+      if (!parsed) {
+        ok = false;
+        detail = "no parsed body (was the response shape valid?)";
+      } else {
+        if (e.top_domain !== undefined) {
+          const top = parsed.cards?.[0];
+          const got = top ? domainKey(top.domain) : "none";
+          if (got !== e.top_domain) { ok = false; detail = `top_domain expected=${e.top_domain} got=${got}`; }
+        }
+        if (ok && e.top_confidence !== undefined) {
+          const got = parsed.cards?.[0]?.confidence;
+          if (got !== e.top_confidence) { ok = false; detail = `top_confidence expected=${e.top_confidence} got=${got}`; }
+        }
+        if (ok && e.top_confidence_not !== undefined) {
+          const got = parsed.cards?.[0]?.confidence;
+          if (got === e.top_confidence_not) { ok = false; detail = `top_confidence MUST NOT be ${e.top_confidence_not} but is`; }
+        }
+        if (ok && e.top_source_url_null !== undefined) {
+          const got = parsed.cards?.[0]?.source_url;
+          const isNull = got === null;
+          if (isNull !== e.top_source_url_null) { ok = false; detail = `top_source_url_null expected=${e.top_source_url_null} got=${got}`; }
+        }
+        if (ok && e.claims_processed !== undefined) {
+          if (parsed.claims_processed !== e.claims_processed) { ok = false; detail = `claims_processed expected=${e.claims_processed} got=${parsed.claims_processed}`; }
+        }
+        if (ok && e.claims_truncated !== undefined) {
+          if (parsed.claims_truncated !== e.claims_truncated) { ok = false; detail = `claims_truncated expected=${e.claims_truncated} got=${parsed.claims_truncated}`; }
+        }
+        if (ok && e.disclaimer_contains !== undefined) {
+          const got = parsed.disclaimer ?? "";
+          if (!got.includes(e.disclaimer_contains)) { ok = false; detail = `disclaimer missing substring '${e.disclaimer_contains}'`; }
+        }
+        if (ok && e.by_domain_counts_keys !== undefined) {
+          const wantKeys = new Set(e.by_domain_counts_keys);
+          const gotKeys = new Set(Object.keys(parsed.by_domain_counts ?? {}));
+          for (const k of wantKeys) if (!gotKeys.has(k)) { ok = false; detail = `by_domain_counts missing key '${k}'`; break; }
+        }
+      }
+    }
+    if (ok) pass++;
+    else failures.push({ q, detail });
+  }
+  mcp.close();
+  console.log(`citation eval: ${pass}/${rows.length} passed`);
+  for (const f of failures.slice(0, 20)) console.error("FAIL", JSON.stringify(f.q.desc ?? f.q.kind), "→", f.detail);
+  const threshold = Math.ceil(rows.length * 0.9);
+  process.exit(pass >= threshold ? 0 : 1);
+}
+
 // ---- dates suite (deterministic — no LLM judge) --------------------------
 // Asserts that find_msu_date returns rows with the exact ISO start/end the
 // upstream calendar publishes. The synonyms eval at evals/calendar-synonyms-eval.ts
