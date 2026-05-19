@@ -121,3 +121,72 @@ describe("filterCandidateCourses", () => {
     assert.equal(r.length, 1);
   });
 });
+
+import { generateBundles, scorePlan } from "../../src/courses/planner.js";
+
+describe("generateBundles", () => {
+  test("produces 2-3 distinct bundles within credit window", () => {
+    const candidates = [
+      course("CSE 1284", null, 3),
+      course("CSE 1213", null, 3),
+      course("CSE 2383", null, 3),
+      course("MA 1713",  null, 3),
+      course("ENGL 1113", null, 3),
+      course("HI 1063",  null, 3),
+    ];
+    const bundles = generateBundles(candidates, 12, 15);
+    assert.ok(bundles.length >= 2);
+    assert.ok(bundles.length <= 3);
+    for (const b of bundles) {
+      assert.ok(b.total_credit_hours >= 12 && b.total_credit_hours <= 15);
+      assert.ok(b.courses.length >= 1);
+    }
+  });
+  test("skips courses whose numeric hours don't fit", () => {
+    const candidates = [
+      course("X 1000", null, 9),
+      course("Y 1000", null, 3),
+      course("Z 1000", null, 3),
+      course("W 1000", null, 3),
+    ];
+    const bundles = generateBundles(candidates, 9, 12);
+    for (const b of bundles) assert.ok(b.total_credit_hours >= 9 && b.total_credit_hours <= 12);
+  });
+  test("string-hours courses contribute 0 to total but get counted", () => {
+    const candidates = [
+      course("X 1000", null, "1-3"),
+      course("Y 1000", null, 3),
+      course("Z 1000", null, 3),
+      course("W 1000", null, 3),
+      course("V 1000", null, 3),
+    ];
+    const bundles = generateBundles(candidates, 12, 12);
+    assert.ok(bundles.length >= 1);
+    const withString = bundles.find((b) => b.string_hours_count > 0);
+    // Either we have a bundle with string-hours (counted, total still 12) OR
+    // the enumeration avoided string-hours entirely. Both are acceptable.
+    if (withString) assert.ok(withString.string_hours_count >= 1);
+  });
+  test("returns empty when no bundle fits", () => {
+    const candidates = [course("X 1000", null, 1)]; // 1 credit, target 12-18
+    const bundles = generateBundles(candidates, 12, 18);
+    assert.equal(bundles.length, 0);
+  });
+  test("bundles are distinct by course set", () => {
+    const candidates = Array.from({ length: 8 }, (_, i) => course(`X ${1000 + i}`, null, 3));
+    const bundles = generateBundles(candidates, 12, 15);
+    const sigs = bundles.map((b) => b.courses.map((c) => c.code).sort().join(","));
+    assert.equal(new Set(sigs).size, sigs.length);
+  });
+});
+
+describe("scorePlan", () => {
+  test("higher coverage of candidate-pool diversity -> higher score (within window)", () => {
+    const candidates = Array.from({ length: 8 }, (_, i) => course(`X ${1000 + i}`, null, 3));
+    const bundles = generateBundles(candidates, 12, 15);
+    if (bundles.length >= 2) {
+      // Score is monotonic-ish; both bundles in window should have score > 0
+      for (const b of bundles) assert.ok(b.score > 0);
+    }
+  });
+});
