@@ -48,7 +48,7 @@ msstate-mcp/                              # repo root = Claude Code marketplace
 │   ├── run-eval.mjs                      # MCP-driven eval harness
 │   └── sync-version.mjs                  # syncs package.json -> plugin.json
 ├── worker/                               # Cloudflare Worker variant (HTTP/JSON-RPC)
-│   ├── src/index.ts                      # MCP-over-HTTP, all 28 tools, BM25 only
+│   ├── src/index.ts                      # MCP-over-HTTP, all 29 tools, BM25 only
 │   ├── corpus.json                       # pre-extracted policies + academic_calendar block
 │   ├── wrangler.toml                     # Cloudflare deploy config
 │   ├── package.json                      # devDeps: wrangler, workers-types
@@ -72,7 +72,7 @@ msstate-mcp/                              # repo root = Claude Code marketplace
     │   ├── index.js                      # COMMITTED bundle (~14 MB)
     │   └── embeddings.json               # COMMITTED embeddings (~24 MB)
     └── src/
-        ├── index.ts                      # MCP server entry (stdio) — registers all 28 tools
+        ├── index.ts                      # MCP server entry (stdio) — registers all 29 tools
         ├── log.ts                        # stderr-only structured logger
         ├── types.ts                      # PolicyEntry, PolicyDocument, PolicyIndex, HealthState
         ├── cache.ts                      # TTLCache<T> (mem + opt-in disk)
@@ -955,3 +955,24 @@ is largely flat-rate.
 Worker mirror inlines rankPrograms / estimateCost / parseStateAuthorization
 (separate bundle from stdio). ONL5 file count bumped 5 -> 7; new ONL6 (10
 pts) gates matcher/estimator/helper purity. Security score 300 -> 310.
+
+### v1.2.5 (2026-05-19) — Semester planner
+
+Adds plan_semester (1 new tool) over the existing CourseCorpus — given a
+department prefix + completed_courses, returns up to 3 candidate course
+bundles within a credit-hour window (default 12-18). Each bundle's courses
+are prereq-validated against the completed set (conservative AND on
+mixed/null logic; non_course gates exclude the course). Bounded enumeration
+(MAX_CANDIDATE_POOL=80, MAX_BUNDLE_SIZE=5, MAX_BUNDLES=3, scored by
+distance-to-midpoint + dept diversity − string-hours count).
+
+EXPLICIT non-goals surfaced in every response.notes: no live section data,
+no degree-audit, no admission prediction. plan_semester is a starting
+point for advising, not a registration plan.
+
+Worker mirror inlines normalizePlanWorker / prereqsSatisfiedWorker /
+filterCandidateCoursesWorker / generateBundlesWorker (separate bundle).
+SERVER_INSTRUCTIONS rule 3 expanded to mention the planner. New eval
+suite at eval/semester.jsonl (12 cases, 90% gate; current pass rate 12/12).
+Tool count 28 -> 29. Security score 310 -> 315 (+5 via new CAT5 check on
+planner purity + input caps).

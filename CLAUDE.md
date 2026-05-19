@@ -24,7 +24,7 @@ After any change in scope, run `bash tools/security-checklist.sh | tail -1` and 
 6. **Online programs** — `online.msstate.edu` (added in v1.0.0)
 7. **Dining** — `dining.msstate.edu` → `msstatedining.mydininghub.com` (added in v1.1.0)
 
-Tool count: **28** (4 policy + 2 calendar + 3 course + 4 emergency + 4 tuition + 7 online + 2 dining + 1 citation + 1 health). Current version: **v1.2.4** (2026-05-19) adds two derived tools over the existing online corpus: `match_online_program` (profile → ranked program shortlist, scoring on career-goal keyword overlap, budget, time, state authorization) and `estimate_program_cost` (slug + credits → per-credit × credits + instructional fee + optional application fee, with degree-level credit defaults when credits aren't supplied). v1.2.3 (2026-05-19) — adds the `citation_card` meta-tool — splits an answer into sentence-level claims and returns one citation card per claim across all 7 corpora (policies, calendar, courses, emergency, tuition, online, dining); each card carries source_url + last_updated + confidence, with explicit confidence='none' for un-citable claims so the model surfaces them as unverified rather than fabricating a URL. v1.2.0 (2026-05-18) adds anonymous-aggregate Worker telemetry (Cloudflare Analytics Engine, k-anonymity enforced at query time) and the v1.2.1 development branch adds the `dates` + `adversarial` eval suites with deterministic suites CI-gated. v1.1.1 (2026-05-16) fixed the broken fuzzy program resolver (PROGRAM_STOP_WORDS + substring pre-stage), stripped analytics-injected HTML chrome from `tuition.raw_prose`, and added the `list_programs_by_staff` reverse-lookup tool. v1.1.0 (2026-05-14) added the dining module (2 tools, daily-refreshed corpus, Playwright modal-click for SPA-rendered hours, status_now computation in America/Chicago). v1.0.2 (2026-05-14) fixed the calendars stdio-bundle path + Worker fail-closed Content-Length. v1.0.1 (2026-05-13) fixed online parser admissions heading match + short_description sourcing. v1.0.0 (2026-05-13) shipped the online module (4 tools). v0.9.0 tightened the prereq parser (3 accuracy gaps closed, 2 new diagnostic fields, 3 new build-time ceilings). All sources serve a pre-baked corpus snapshot — zero runtime fetches to MSU at request time on the Worker; local stdio path live-scrapes policies. For project overview, architecture, decision history, eval methodology, and open issues, see [`docs/BUILD.md`](./docs/BUILD.md). Read it once before non-trivial work.
+Tool count: **29** (4 policy + 2 calendar + 4 course + 4 emergency + 4 tuition + 7 online + 2 dining + 1 citation + 1 health). Current version: **v1.2.5** (2026-05-19) adds the catalog-only `plan_semester` tool: given a department (CSE / MA / ENGL) + the student's completed courses, returns up to 3 candidate course bundles within a configurable credit-hour window. Prereq-validates each course (conservative AND on mixed/null logic; non_course gates like "instructor permission" exclude the course). Explicitly non-goal: no live section / seat availability, no degree-requirement check, no admission-probability prediction — every response surfaces these limits in the notes field. v1.2.4 (2026-05-19) adds two derived tools over the existing online corpus: `match_online_program` (profile → ranked program shortlist, scoring on career-goal keyword overlap, budget, time, state authorization) and `estimate_program_cost` (slug + credits → per-credit × credits + instructional fee + optional application fee, with degree-level credit defaults when credits aren't supplied). v1.2.3 (2026-05-19) — adds the `citation_card` meta-tool — splits an answer into sentence-level claims and returns one citation card per claim across all 7 corpora (policies, calendar, courses, emergency, tuition, online, dining); each card carries source_url + last_updated + confidence, with explicit confidence='none' for un-citable claims so the model surfaces them as unverified rather than fabricating a URL. v1.2.0 (2026-05-18) adds anonymous-aggregate Worker telemetry (Cloudflare Analytics Engine, k-anonymity enforced at query time) and the v1.2.1 development branch adds the `dates` + `adversarial` eval suites with deterministic suites CI-gated. v1.1.1 (2026-05-16) fixed the broken fuzzy program resolver (PROGRAM_STOP_WORDS + substring pre-stage), stripped analytics-injected HTML chrome from `tuition.raw_prose`, and added the `list_programs_by_staff` reverse-lookup tool. v1.1.0 (2026-05-14) added the dining module (2 tools, daily-refreshed corpus, Playwright modal-click for SPA-rendered hours, status_now computation in America/Chicago). v1.0.2 (2026-05-14) fixed the calendars stdio-bundle path + Worker fail-closed Content-Length. v1.0.1 (2026-05-13) fixed online parser admissions heading match + short_description sourcing. v1.0.0 (2026-05-13) shipped the online module (4 tools). v0.9.0 tightened the prereq parser (3 accuracy gaps closed, 2 new diagnostic fields, 3 new build-time ceilings). All sources serve a pre-baked corpus snapshot — zero runtime fetches to MSU at request time on the Worker; local stdio path live-scrapes policies. For project overview, architecture, decision history, eval methodology, and open issues, see [`docs/BUILD.md`](./docs/BUILD.md). Read it once before non-trivial work.
 
 The server ships in two surfaces from one bundle:
 - **Claude Code plugin** (`/plugin install msstate-policies@msstate-mcp`)
@@ -288,6 +288,27 @@ default applied.
 **Security checks updated:** ONL5 references 7 tool files (was 5). New ONL6
 (10 pts): matcher + estimator + helper never call fetch/require/env/fs/
 child_process. Score 300 -> 310.
+
+### Corpus extension (2026-05-19) — semester planner (v1.2.5)
+
+Adds 1 derived tool (`plan_semester`) over the existing CourseCorpus.
+No new corpus sources. Tool count 28 -> 29.
+
+**`plan_semester(department, completed_courses, target_credits_min?,
+target_credits_max?, focus_keyword?, level?)`** — returns up to 3 candidate
+course bundles within the credit-hour window. Prereq satisfaction uses
+conservative AND on mixed/null logic; non_course gates (e.g., "instructor
+permission") exclude the course. Bounded enumeration: candidate pool capped
+at 80, bundles 1-5 courses, top 3 distinct by score (distance-to-midpoint +
+dept diversity − string-hours count).
+
+**Explicit non-goals (surfaced in every response.notes):** no live section
+availability, no degree-audit, no admission-probability prediction.
+
+**Security check (+5 pts, 310 -> 315):**
+- CAT5 (5 pts): plan_semester + planner.ts contain no fetch/require/env/fs/
+  child_process + zod input caps enforced (max(MAX_QUERY_CHARS) appears
+  >= 2 times in plan_semester.ts).
 
 ### Corpus extension (2026-05-15) — online module fixes (v1.1.1)
 

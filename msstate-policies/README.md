@@ -2,7 +2,7 @@
 
 MCP server exposing seven Mississippi State University content domains: Operating Policies (<https://www.policies.msstate.edu/current>), six academic-date sources (registrar academic + exam calendars, university holidays, graduate school PDFs, financial aid, housing), the course catalog with prereq DAG, emergency guidance, tuition & fees, online programs, and dining venues with per-day hours. **Unofficial — not affiliated with MSU. Always verify against the official source.**
 
-Current version: **v1.2.4** (2026-05-19). Adds two derived tools over the existing online corpus: `match_online_program` (profile → ranked shortlist) and `estimate_program_cost` (slug + credits → total-cost rollup). v1.2.3 (2026-05-19) adds the `citation_card` meta-tool — splits an answer into sentence-level claims and returns one citation card per claim across all 7 corpora with source_url + last_updated + confidence. v1.2.0 (2026-05-18) adds anonymous-aggregate Worker telemetry (Cloudflare Analytics Engine; k-anonymity enforced at query time). v1.1.1 fixed the fuzzy program resolver and added `list_programs_by_staff`. v1.1.0 added the dining module (2 tools, daily-refreshed corpus, status_now in America/Chicago). v1.0.0 added the online module (4 tools). Calendar retrieval uses BM25 over a 4-field weighted index where the `synonyms` field is populated at **build time** by Anthropic Claude Haiku — runtime stays pure BM25 with **zero third-party API calls**.
+Current version: **v1.2.5** (2026-05-19). Adds the catalog-only `plan_semester` tool: department + completed courses → up to 3 candidate course bundles within a credit-hour window. v1.2.4 (2026-05-19) adds two derived tools over the existing online corpus: `match_online_program` (profile → ranked shortlist) and `estimate_program_cost` (slug + credits → total-cost rollup). v1.2.3 (2026-05-19) adds the `citation_card` meta-tool — splits an answer into sentence-level claims and returns one citation card per claim across all 7 corpora with source_url + last_updated + confidence. v1.2.0 (2026-05-18) adds anonymous-aggregate Worker telemetry (Cloudflare Analytics Engine; k-anonymity enforced at query time). v1.1.1 fixed the fuzzy program resolver and added `list_programs_by_staff`. v1.1.0 added the dining module (2 tools, daily-refreshed corpus, status_now in America/Chicago). v1.0.0 added the online module (4 tools). Calendar retrieval uses BM25 over a 4-field weighted index where the `synonyms` field is populated at **build time** by Anthropic Claude Haiku — runtime stays pure BM25 with **zero third-party API calls**.
 
 This is the publishable npm package and the Claude Code plugin source. See the [repository root README](../README.md) for the user-facing walkthrough, install paths, and what to expect from a response.
 
@@ -18,11 +18,11 @@ npx -y msstate-policies-mcp
 node /path/to/msstate-mcp/msstate-policies/dist/index.js
 ```
 
-## Tools (28)
+## Tools (29)
 
 **Policies (4):** `search_policies`, `get_policy`, `chain_find_relevant_policies`, `cite_policy`
 **Calendars (2, v0.4.0+, synonyms-aware in v0.5.0):** `find_msu_date`, `get_msu_calendar`
-**Courses (3, v0.6.0+, prereq diagnostics in v0.9.0):** `search_msu_courses`, `get_msu_course`, `get_msu_course_graph`
+**Courses (4, v0.6.0+, prereq diagnostics in v0.9.0, semester planner in v1.2.5):** `search_msu_courses`, `get_msu_course`, `get_msu_course_graph`, `plan_semester`
 **Emergency (4, v0.7.0):** `get_msu_emergency_guideline`, `list_msu_emergency_types`, `find_msu_severe_weather_refuge`, `get_msu_emergency_contacts`
 **Tuition (4, v0.8.0):** `get_msu_tuition_rate`, `get_msu_enrollment_fees`, `find_msu_tuition_faq`, `list_msu_tuition_campuses`
 **Online (7, v1.0.0 + v1.1.1 + v1.2.4):** `list_online_programs`, `get_online_program`, `get_online_admissions_process`, `find_online_info`, `list_programs_by_staff`, `match_online_program`, `estimate_program_cost`
@@ -30,7 +30,7 @@ node /path/to/msstate-mcp/msstate-policies/dist/index.js
 **Citation (1, v1.2.3):** `citation_card`
 **Diagnostics (1):** `health_check`
 
-See the [root README](../README.md#the-28-tools) for tool descriptions and example responses.
+See the [root README](../README.md#the-29-tools) for tool descriptions and example responses.
 
 ## Environment variables
 

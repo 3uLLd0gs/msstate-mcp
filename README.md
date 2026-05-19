@@ -4,7 +4,7 @@
 
 > ⚠️ **Unofficial.** Not affiliated with, endorsed by, or sponsored by Mississippi State University. Every answer must be verified against the official MSU source before you act on it — see [Always double-check](#always-double-check) for why.
 
-**28 MCP tools across 7 MSU content domains.** Current version: **v1.2.4** (2026-05-19). The hosted Cloudflare Worker ships routing instructions over MCP — Claude and ChatGPT both pick the right tool without per-session prompting.
+**29 MCP tools across 7 MSU content domains.** Current version: **v1.2.5** (2026-05-19). The hosted Cloudflare Worker ships routing instructions over MCP — Claude and ChatGPT both pick the right tool without per-session prompting.
 
 | Domain | Coverage | Source |
 |---|---|---|
@@ -131,7 +131,7 @@ Fastest path. Works in the browser and the Claude iOS/Android apps. Requires a p
 1. Sign in at <https://claude.ai>
 2. **Settings → Connectors → Add custom connector**
 3. **Name:** `MSU` &nbsp;&nbsp; **URL:** `https://msstate-policies-mcp.mminsub90.workers.dev/mcp`
-4. Save. You should see **28 tools** appear
+4. Save. You should see **29 tools** appear
 5. New chat, enable the connector, ask a question
 
 Mobile apps pick up the connector automatically once you set it up on web.
@@ -143,7 +143,7 @@ Same flow as claude.ai. Free-tier ChatGPT can't add connectors — use the [Open
 1. Sign in at <https://chatgpt.com>
 2. **Settings → Connectors → Add custom connector**
 3. **Name:** `MSU` &nbsp;&nbsp; **URL:** `https://msstate-policies-mcp.mminsub90.workers.dev/mcp`
-4. Save → 28 tools available
+4. Save → 29 tools available
 
 ChatGPT routing used to be hit-or-miss because there was no way to inject a system prompt through the connector. Since v0.8.0 the server provides routing rules via MCP's `InitializeResult.instructions` field, so GPT picks the right tool out of the box.
 
@@ -186,7 +186,7 @@ You need [Node.js 18+](https://nodejs.org).
 
 **3.** Fully quit the client (Cmd+Q / right-click tray → Quit) and reopen.
 
-**4.** Verify the `msstate-policies` server shows **28 tools**. First call takes ~5 seconds (cold fetch); later calls reuse cached data.
+**4.** Verify the `msstate-policies` server shows **29 tools**. First call takes ~5 seconds (cold fetch); later calls reuse cached data.
 
 Ready-to-paste snippet at [`examples/claude_desktop_config.json`](examples/claude_desktop_config.json).
 
@@ -236,7 +236,7 @@ Free claude.ai can't add MCP connectors, so use a curated **starter zip** of 22 
 
 ---
 
-## The 28 tools
+## The 29 tools
 
 | Tool | Use it for |
 |---|---|
