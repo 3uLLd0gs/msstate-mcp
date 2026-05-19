@@ -1560,6 +1560,160 @@ function parseStateAuthorizationWorker(): StateAuthorizationWorker | null {
   return { authorized_states: [...matches] };
 }
 
+// ---- Semester planner (inline mirror of src/courses/planner.ts) ------------
+// Re-implemented in the worker bundle because it has no shared modules with
+// stdio. Keep these helpers in sync with msstate-policies/src/courses/planner.ts.
+
+const PLAN_DEPT_RE = /^[A-Z]{2,4}$/;
+const PLAN_MAX_CANDIDATE_POOL = 80;
+const PLAN_MAX_BUNDLES = 3;
+
+interface PlanCandidateCourseWorker {
+  code: string;
+  title: string;
+  hours: number | string;
+  prereq_summary: string | null;
+  prereq_parse_warnings: string[];   // PrereqWarning[]
+  source_url: string;
+}
+
+interface PlanCandidateWorker {
+  bundle_id: string;
+  bundle_label: string;
+  courses: PlanCandidateCourseWorker[];
+  total_credit_hours: number;
+  string_hours_count: number;
+  score: number;
+  notes: string[];
+}
+
+interface SemesterPlanResultWorker {
+  department: string;
+  completed_courses_normalized: string[];
+  target_credits_min: number;
+  target_credits_max: number;
+  candidates: PlanCandidateWorker[];
+  candidate_pool_size: number;
+  notes: string[];
+}
+
+function normalizePlanWorker(code: string): string {
+  return (code ?? "").toUpperCase().trim().replace(/\s+/g, " ");
+}
+
+function prereqsSatisfiedWorker(course: Course, completedNorm: Set<string>): boolean {
+  const p = course.prereqs;
+  if (!p) return true;
+  if (p.required_courses.length === 0 && p.non_course.length === 0) return true;
+  if (p.non_course.length > 0) return false;
+  const reqs = p.required_courses.map(normalizePlanWorker);
+  const logic = p.logic ?? "and";
+  if (logic === "or") return reqs.some((r) => completedNorm.has(r));
+  return reqs.every((r) => completedNorm.has(r));
+}
+
+function filterCandidateCoursesWorker(
+  dept: string,
+  completedNorm: Set<string>,
+  focusKeyword: string | undefined,
+  level: "undergraduate" | "graduate" | undefined,
+): Course[] {
+  if (!COURSES) return [];
+  const deptUpper = dept.toUpperCase().trim();
+  if (!PLAN_DEPT_RE.test(deptUpper)) throw new Error("department must be 2-4 letters");
+  const keyword = focusKeyword?.toLowerCase().trim() || null;
+  const out: Course[] = [];
+  for (const c of Object.values(COURSES.records)) {
+    if (!c.code.startsWith(deptUpper + " ")) continue;
+    if (completedNorm.has(c.code)) continue;
+    if (level && c.level !== level) continue;
+    if (keyword) {
+      const hay = `${c.title} ${c.description}`.toLowerCase();
+      if (!hay.includes(keyword)) continue;
+    }
+    if (!prereqsSatisfiedWorker(c, completedNorm)) continue;
+    out.push(c);
+  }
+  return out;
+}
+
+function planCourseHours(h: number | string): number {
+  return typeof h === "number" ? h : 0;
+}
+
+function planToCandidateCourse(c: Course): PlanCandidateCourseWorker {
+  return {
+    code: c.code,
+    title: c.title,
+    hours: c.hours,
+    prereq_summary: c.prereq_summary ?? null,
+    prereq_parse_warnings: (c.prereqs?.parse_warnings ?? []) as string[],
+    source_url: c.source_url,
+  };
+}
+
+function generateBundlesWorker(
+  candidates: Course[],
+  minCr: number,
+  maxCr: number,
+): PlanCandidateWorker[] {
+  if (minCr < 0 || maxCr < minCr) return [];
+  const pool = candidates.slice(0, PLAN_MAX_CANDIDATE_POOL);
+  const bundles = new Map<string, { courses: Course[]; total: number; stringCount: number }>();
+  const N = pool.length;
+
+  function tryAdd(items: Course[]) {
+    const total = items.reduce((s, c) => s + planCourseHours(c.hours), 0);
+    if (total < minCr || total > maxCr) return;
+    const stringCount = items.filter((c) => typeof c.hours !== "number").length;
+    const codes = items.map((c) => c.code).sort();
+    const key = codes.join(",");
+    if (!bundles.has(key)) bundles.set(key, { courses: items, total, stringCount });
+  }
+
+  for (let i = 0; i < N; i++) tryAdd([pool[i]]);
+  for (let i = 0; i < N; i++) {
+    for (let j = i + 1; j < N; j++) {
+      tryAdd([pool[i], pool[j]]);
+      for (let k = j + 1; k < N; k++) {
+        tryAdd([pool[i], pool[j], pool[k]]);
+        for (let l = k + 1; l < N; l++) {
+          tryAdd([pool[i], pool[j], pool[k], pool[l]]);
+          for (let m = l + 1; m < N; m++) {
+            tryAdd([pool[i], pool[j], pool[k], pool[l], pool[m]]);
+          }
+        }
+      }
+    }
+  }
+
+  const midpoint = (minCr + maxCr) / 2;
+  const ranked = [...bundles.values()].map(({ courses, total, stringCount }) => {
+    const distance = Math.abs(total - midpoint);
+    const distinctDepts = new Set(courses.map((c) => c.code.split(" ")[0])).size;
+    const score = Math.max(0, Math.round(100 - distance * 5 - stringCount * 5 + distinctDepts * 3));
+    return { courses, total, stringCount, score };
+  }).sort((a, b) => b.score - a.score);
+
+  return ranked.slice(0, PLAN_MAX_BUNDLES).map((b, i) => ({
+    bundle_id: ["core", "balanced", "stretch"][i] ?? `bundle-${i}`,
+    bundle_label: ["Core load", "Balanced load", "Stretch load"][i] ?? `Bundle ${i + 1}`,
+    courses: b.courses.map(planToCandidateCourse),
+    total_credit_hours: b.total,
+    string_hours_count: b.stringCount,
+    score: b.score,
+    notes: b.stringCount > 0
+      ? [`${b.stringCount} course(s) have variable credit hours — total assumes 0 for those; consult catalog.`]
+      : [],
+  }));
+}
+
+const PLAN_NON_GOAL_NOTES = [
+  "Plan provides no live section / seat availability data — catalog.msstate.edu does not publish term sections.",
+  "Plan does NOT verify degree requirement coverage — required-for-major lists are not in the catalog corpus.",
+  "Plan does NOT predict admission to restricted courses (e.g., major-restricted, instructor-permission).",
+];
+
 // ---- Citation router (inline mirror of src/citation/router.ts) -------------
 // Re-implemented here because the Worker is a separate bundle from
 // msstate-policies/. Keep the field/accessor names in this block aligned with
@@ -1959,6 +2113,26 @@ const TOOLS = [
         },
       },
       required: ["code", "direction"],
+    },
+  },
+  {
+    name: "plan_semester",
+    description:
+      "Catalog-only semester planner. Given a `department` (2-4 letter prefix like 'CSE' / 'MA' / 'ENGL') and the student's `completed_courses` (course codes), returns up to 3 candidate bundles of courses sized to the credit-hour window (default 12-18). " +
+      "Each bundle's courses are prereq-validated against `completed_courses` (conservative AND on mixed/null logic; non_course gates like 'instructor permission' exclude the course). " +
+      "Optional `focus_keyword` filters on title + description (e.g., 'algorithms'). Optional `level` restricts to undergraduate or graduate. " +
+      "EXPLICIT NON-GOALS: this does NOT check live section / seat availability, does NOT verify degree requirement coverage, does NOT predict admission to restricted courses. Treat output as a starting point for advising, not a registration plan. Every response surfaces these limits in the `notes` field.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        department: { type: "string", minLength: 2, maxLength: 4096, description: "2-4 letter dept prefix, case-insensitive" },
+        completed_courses: { type: "array", items: { type: "string", maxLength: 4096 }, maxItems: 200, default: [] },
+        target_credits_min: { type: "integer", minimum: 0, maximum: 30, default: 12 },
+        target_credits_max: { type: "integer", minimum: 0, maximum: 30, default: 18 },
+        focus_keyword: { type: "string", maxLength: 4096 },
+        level: { type: "string", enum: ["undergraduate", "graduate"] },
+      },
+      required: ["department"],
     },
   },
   {
@@ -2535,6 +2709,67 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Mc
       return jsonContent(g);
     }
 
+    case "plan_semester": {
+      const department = typeof args?.department === "string" ? args.department : "";
+      if (department.length < 2) return errorContent("plan_semester requires a `department` argument (2-4 letters).");
+      if (department.length > MAX_QUERY_CHARS) return tooLong("department", department);
+      const focus_keyword = typeof args?.focus_keyword === "string" ? args.focus_keyword : undefined;
+      if (focus_keyword !== undefined && focus_keyword.length > MAX_QUERY_CHARS) return tooLong("focus_keyword", focus_keyword);
+      const level = (args?.level === "undergraduate" || args?.level === "graduate") ? args.level : undefined;
+      const target_credits_min = typeof args?.target_credits_min === "number" ? args.target_credits_min : 12;
+      const target_credits_max = typeof args?.target_credits_max === "number" ? args.target_credits_max : 18;
+      if (target_credits_min < 0 || target_credits_min > 30) return errorContent("target_credits_min must be 0-30");
+      if (target_credits_max < 0 || target_credits_max > 30) return errorContent("target_credits_max must be 0-30");
+      if (target_credits_max < target_credits_min) return errorContent("target_credits_max must be >= target_credits_min");
+      const completed_input = Array.isArray(args?.completed_courses) ? args.completed_courses : [];
+      if (completed_input.length > 200) return errorContent("completed_courses must be <= 200 entries");
+      for (const cc of completed_input) {
+        if (typeof cc !== "string") return errorContent("completed_courses[] must be strings");
+        if (cc.length > MAX_QUERY_CHARS) return tooLong("completed_courses[]", cc);
+      }
+
+      if (!COURSES) {
+        return jsonContent({
+          department: department.toUpperCase().trim(),
+          completed_courses_normalized: [],
+          target_credits_min,
+          target_credits_max,
+          candidates: [],
+          candidate_pool_size: 0,
+          notes: ["course corpus not loaded — server may be in cold-start", ...PLAN_NON_GOAL_NOTES],
+        });
+      }
+
+      const completed = new Set((completed_input as string[]).map(normalizePlanWorker).filter((c) => c.length > 0));
+      let candidates: Course[];
+      try {
+        candidates = filterCandidateCoursesWorker(department, completed, focus_keyword, level);
+      } catch (err) {
+        return errorContent(err instanceof Error ? err.message : String(err));
+      }
+      const bundles = generateBundlesWorker(candidates, target_credits_min, target_credits_max);
+
+      const notes = [...PLAN_NON_GOAL_NOTES];
+      if (bundles.length === 0) {
+        notes.unshift(
+          candidates.length === 0
+            ? `no valid bundle: no courses in ${department.toUpperCase().trim()} satisfied prereqs from completed_courses (pool=${candidates.length})`
+            : `no valid bundle: ${candidates.length} candidate course(s) but none combine to a total within [${target_credits_min}, ${target_credits_max}] credit-hour window`,
+        );
+      }
+
+      const result: SemesterPlanResultWorker = {
+        department: department.toUpperCase().trim(),
+        completed_courses_normalized: [...completed],
+        target_credits_min,
+        target_credits_max,
+        candidates: bundles,
+        candidate_pool_size: candidates.length,
+        notes,
+      };
+      return jsonContent(result);
+    }
+
     case "get_msu_emergency_guideline": {
       const raw = String(args.emergency_type ?? "");
       if (raw.length === 0) return errorContent("emergency_type is required.");
@@ -3045,7 +3280,7 @@ Routing rules — pick the tool whose CATEGORY matches the question. If your fir
 
 1. Policy / rule questions ("what's the policy on...", "is X allowed?", "what's the rule for...") → chain_find_relevant_policies with k=5.
 2. Date / deadline / holiday / closure / break / exam-schedule questions ("when is...", "what days off", "spring break", "staff holidays", "fall 2026 exams") → find_msu_date. Use get_msu_calendar with source="university_holidays" for the full holiday list. If the user does NOT specify a year, present ALL year-versions returned.
-3. Course questions ("what's the prereq for...", "what does X unlock?", "find a class about Y") → search_msu_courses, get_msu_course, get_msu_course_graph.
+3. Course questions ("what's the prereq for...", "what does X unlock?", "find a class about Y", "what should I take next semester in CSE?") → search_msu_courses, get_msu_course, get_msu_course_graph, plan_semester. Use plan_semester when the user gives a department + completed courses and wants a candidate schedule. Always surface the non-goals from plan_semester.notes (no live sections, no degree-audit, no admission prediction).
 4. Emergency / safety questions (tornado, fire, active shooter, refuge area, MSU PD) → get_msu_emergency_guideline, find_msu_severe_weather_refuge, get_msu_emergency_contacts. For life-threatening situations, ALWAYS lead with "Call 911 now."
 5. Tuition / fee / cost questions ("how much is tuition", "college fees", "DVM cost") → get_msu_tuition_rate (structured: campus + level + residency), get_msu_enrollment_fees, find_msu_tuition_faq, list_msu_tuition_campuses.
 6. Online-program / online-admissions / online-student-services questions ("does MSU have an online MBA?", "how do I apply to MSU online?", "who's the advisor for the online psychology program?", "what's the application deadline for the online MS in Cybersecurity?", "does MSU online operate in my state?", "military assistance for MSU online", "which online program fits me?", "how much does an online master's cost?") → list_online_programs / get_online_program / get_online_admissions_process / find_online_info / list_programs_by_staff / match_online_program / estimate_program_cost, picked by question shape. Use match_online_program when the user describes a profile (career goal, budget, level, state) and wants a shortlist; use estimate_program_cost when the user names a specific program and asks "how much". Distinction from policies/courses/tuition: the online module covers MSU's ONLINE program offerings via online.msstate.edu — distinct from the broader policy/course/tuition corpus. Online-specific tuition rates from controller.msstate.edu stay under get_msu_tuition_rate.
