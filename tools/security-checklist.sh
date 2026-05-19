@@ -444,6 +444,25 @@ else
   note "FAIL" "CAT4 CATALOG_ROOTS allowlist missing or not frozen" 2
 fi
 
+# CAT5 (5 pts, added 2026-05-19): plan_semester + planner.ts pure (no
+# fetch/env/fs/child_process) AND tool enforces zod input caps on department,
+# completed_courses entries, and focus_keyword.
+CAT5_OK=0
+if [ -f msstate-policies/src/tools/plan_semester.ts ] \
+   && [ -f msstate-policies/src/courses/planner.ts ]; then
+  BAD=$(grep -nE 'fetch\(|require\(|process\.env|child_process|fs\.' \
+    msstate-policies/src/tools/plan_semester.ts \
+    msstate-policies/src/courses/planner.ts 2>/dev/null | wc -l | tr -d ' ')
+  CAPS=$(grep -cE 'max\(MAX_QUERY_CHARS\)' msstate-policies/src/tools/plan_semester.ts 2>/dev/null)
+  if [ "$BAD" = "0" ] && [ "$CAPS" -ge 2 ]; then CAT5_OK=1; fi
+fi
+if [ "$CAT5_OK" = "1" ]; then
+  score=$((score + 5))
+  note "PASS" "CAT5 plan_semester pure + input caps enforced" 5
+else
+  note "FAIL" "CAT5 plan_semester impure or missing input caps" 5
+fi
+
 # ---- v0.7.0: emergency-guideline security checks ---------------------------
 
 # EMG1: every https URL inside the emergency module stays on msstate.edu.
