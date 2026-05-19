@@ -577,7 +577,7 @@ else
 fi
 
 # =============================================================================
-# Online module checks (ONL1-ONL5, added 2026-05-13). +12 pts total.
+# Online module checks (ONL1-ONL6; ONL6 added 2026-05-19). +22 pts total.
 # =============================================================================
 
 # ONL1: All https:// URLs inside msstate-policies/src/online/ stay on *.msstate.edu.
@@ -634,16 +634,36 @@ ONL5_OK=1
 if ! grep -q 'ONLINE_DISCLAIMER' msstate-policies/src/online/types.ts 2>/dev/null; then
   ONL5_OK=0
 fi
-for f in list_online_programs get_online_program get_online_admissions_process find_online_info list_programs_by_staff; do
+for f in list_online_programs get_online_program get_online_admissions_process find_online_info list_programs_by_staff match_online_program estimate_program_cost; do
   if ! grep -q 'ONLINE_DISCLAIMER' "msstate-policies/src/tools/${f}.ts" 2>/dev/null; then
     ONL5_OK=0
   fi
 done
 if [ "$ONL5_OK" = "1" ]; then
   score=$((score + 2))
-  note "PASS" "ONL5 ONLINE_DISCLAIMER present in types.ts + 5 tool files" 2
+  note "PASS" "ONL5 ONLINE_DISCLAIMER present in types.ts + 7 tool files" 2
 else
   note "FAIL" "ONL5 ONLINE_DISCLAIMER missing from types.ts or one of the tool files" 2
+fi
+
+# ONL6 (10 pts): matcher + estimator + the matcher.ts helper never call
+# fetch / require / process.env / fs / child_process at runtime.
+# Pure-derived over the already-loaded OnlineCorpus.
+ONL6_OK=0
+if [ -f msstate-policies/src/tools/match_online_program.ts ] \
+   && [ -f msstate-policies/src/tools/estimate_program_cost.ts ] \
+   && [ -f msstate-policies/src/online/matcher.ts ]; then
+  BAD=$(grep -nE 'fetch\(|require\(|process\.env|child_process|fs\.' \
+    msstate-policies/src/tools/match_online_program.ts \
+    msstate-policies/src/tools/estimate_program_cost.ts \
+    msstate-policies/src/online/matcher.ts 2>/dev/null | wc -l | tr -d ' ')
+  [ "$BAD" = "0" ] && ONL6_OK=1
+fi
+if [ "$ONL6_OK" = "1" ]; then
+  score=$((score + 10))
+  note "PASS" "ONL6 matcher/estimator/matcher.ts pure (no fetch/env/fs/child_process)" 10
+else
+  note "FAIL" "ONL6 matcher/estimator/matcher.ts made a forbidden runtime call" 10
 fi
 
 # =============================================================================
