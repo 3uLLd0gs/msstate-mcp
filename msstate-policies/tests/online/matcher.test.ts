@@ -1,6 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { estimateCost } from "../../src/online/matcher.js";
+import { rankPrograms } from "../../src/online/matcher.js";
 import type { OnlineProgram, DegreeLevel } from "../../src/online/types.js";
 
 function prog(over: Partial<OnlineProgram> = {}): OnlineProgram {
@@ -77,5 +78,62 @@ describe("estimateCost", () => {
   });
   test("rejects negative credits", () => {
     assert.throws(() => estimateCost(prog(), -1, false), /credits must be >= 0/);
+  });
+});
+
+describe("rankPrograms", () => {
+  const PROGRAMS = [
+    prog({ slug: "mba", name: "Master of Business Administration", degree_level: "master",
+      short_description: "Accelerated MBA for working professionals" }),
+    prog({ slug: "ms-cyber-security", name: "M.S. in Cyber Security", degree_level: "master",
+      short_description: "Cybersecurity master's, fully online" }),
+    prog({ slug: "bsee", name: "Bachelor in Electrical Engineering", degree_level: "bachelor",
+      short_description: "BSEE delivered online" }),
+  ];
+
+  test("ranks by career_goal keyword overlap", () => {
+    const r = rankPrograms(PROGRAMS, { career_goal: "cyber security" }, null);
+    assert.equal(r[0].slug, "ms-cyber-security");
+    assert.ok(r[0].fit_reasons.some((x) => /career_goal/.test(x)));
+  });
+  test("hard-filters by level_preference", () => {
+    const r = rankPrograms(PROGRAMS, { level_preference: "bachelor" }, null);
+    assert.equal(r.length, 1);
+    assert.equal(r[0].slug, "bsee");
+  });
+  test("budget cap drops over-budget programs from top results", () => {
+    // 30 credits * $750/cr = $22,500 tuition + $1,500 inst fee = $24,000
+    const r = rankPrograms(PROGRAMS, { career_goal: "business", budget_usd: 10_000 }, null);
+    const mba = r.find((x) => x.slug === "mba");
+    assert.ok(mba === undefined || mba.fit_score < 50, "MBA must be filtered or low-scored when over budget");
+  });
+  test("state_authorization_flag defaults to unknown when no auth list provided", () => {
+    const r = rankPrograms(PROGRAMS, { state: "CA" }, null);
+    assert.ok(r.every((x) => x.state_authorization_flag === "unknown"));
+  });
+  test("state_authorization_flag is ok when state present in restricted-list shape", () => {
+    const r = rankPrograms(PROGRAMS, { state: "MS" }, { authorized_states: ["MS", "AL", "TN"] });
+    assert.ok(r.every((x) => x.state_authorization_flag === "ok"));
+  });
+  test("state_authorization_flag is check_state_authorization_page when state not in allowlist", () => {
+    const r = rankPrograms(PROGRAMS, { state: "CA" }, { authorized_states: ["MS", "AL"] });
+    assert.ok(r.every((x) => x.state_authorization_flag === "check_state_authorization_page"));
+  });
+  test("returns up to 5 results sorted by fit_score desc", () => {
+    const many = Array.from({ length: 12 }, (_, i) =>
+      prog({ slug: `p${i}`, name: `Program ${i} data analytics`, short_description: "data" }));
+    const r = rankPrograms(many, { career_goal: "data analytics" }, null);
+    assert.ok(r.length <= 5);
+    for (let i = 1; i < r.length; i++) assert.ok(r[i - 1].fit_score >= r[i].fit_score);
+  });
+  test("estimated_total_usd populated when per_credit present", () => {
+    const r = rankPrograms(PROGRAMS, { career_goal: "business" }, null);
+    const mba = r.find((x) => x.slug === "mba");
+    assert.ok(mba && mba.estimated_total_usd !== null);
+  });
+  test("application_deadline_next picks first non-empty deadline", () => {
+    const p = prog({ application_deadlines: [{ term: "Fall", date_text: "August 1" }] });
+    const r = rankPrograms([p], { career_goal: "mba" }, null);
+    assert.deepEqual(r[0].application_deadline_next, { term: "Fall", date_text: "August 1" });
   });
 });
