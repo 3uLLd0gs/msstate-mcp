@@ -48,7 +48,7 @@ msstate-mcp/                              # repo root = Claude Code marketplace
 │   ├── run-eval.mjs                      # MCP-driven eval harness
 │   └── sync-version.mjs                  # syncs package.json -> plugin.json
 ├── worker/                               # Cloudflare Worker variant (HTTP/JSON-RPC)
-│   ├── src/index.ts                      # MCP-over-HTTP, all 25 tools, BM25 only
+│   ├── src/index.ts                      # MCP-over-HTTP, all 26 tools, BM25 only
 │   ├── corpus.json                       # pre-extracted policies + academic_calendar block
 │   ├── wrangler.toml                     # Cloudflare deploy config
 │   ├── package.json                      # devDeps: wrangler, workers-types
@@ -72,7 +72,7 @@ msstate-mcp/                              # repo root = Claude Code marketplace
     │   ├── index.js                      # COMMITTED bundle (~14 MB)
     │   └── embeddings.json               # COMMITTED embeddings (~24 MB)
     └── src/
-        ├── index.ts                      # MCP server entry (stdio) — registers all 25 tools
+        ├── index.ts                      # MCP server entry (stdio) — registers all 26 tools
         ├── log.ts                        # stderr-only structured logger
         ├── types.ts                      # PolicyEntry, PolicyDocument, PolicyIndex, HealthState
         ├── cache.ts                      # TTLCache<T> (mem + opt-in disk)
@@ -913,3 +913,22 @@ DIN1-DIN6 in `tools/security-checklist.sh` (+15 pts; 269 -> 284 Linux CI):
 - Historical / superseded policies beyond what PDF metadata exposes.
 - Telemetry server. Out of scope.
 - Hardcoded policy text or cite examples. Anything that didn't come from the live site in this same session is "placeholder" or "example only" or labeled as such.
+
+### v1.2.3 (2026-05-19) — Citation card meta-tool
+
+Adds citation_card (1 new tool) — splits answer text into sentence-level
+claims, routes each to one of the 7 corpora, returns one card per claim with
+source_url + last_updated + confidence. Builds on the existing per-corpus
+search helpers (bm25Search, searchCalendarRows, bm25SearchInfo, getCourse,
+guideline/refuge/contact accessors). No new corpus sources, no new scrapes.
+
+Pure-derived: the router and tool files contain no fetch/require/env/fs/
+child_process. The policies branch may chain to getPolicy() which does
+network I/O on a cache miss; that I/O is scoped and gated by the dist
+bundle's existing policy disk cache. Worker mirror inlines the entire
+router/searcher chain (the Worker has no shared modules with stdio).
+
+Security score 292 -> 300 (+8 pts) via CIT1-CIT3.
+Eval: 15-case suite (`eval/citation.jsonl`) gated at 90% in
+`node scripts/run-eval.mjs --suite citation` (current pass rate 15/15).
+Tool count 25 -> 26.

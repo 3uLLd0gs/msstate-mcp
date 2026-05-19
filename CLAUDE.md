@@ -24,7 +24,7 @@ After any change in scope, run `bash tools/security-checklist.sh | tail -1` and 
 6. **Online programs** — `online.msstate.edu` (added in v1.0.0)
 7. **Dining** — `dining.msstate.edu` → `msstatedining.mydininghub.com` (added in v1.1.0)
 
-Tool count: **25** (4 policy + 2 calendar + 3 course + 4 emergency + 4 tuition + 5 online + 2 dining + 1 health). Current version: **v1.2.0** (2026-05-18) — adds anonymous-aggregate Worker telemetry (Cloudflare Analytics Engine, k-anonymity enforced at query time) and the v1.2.1 development branch adds the `dates` + `adversarial` eval suites with deterministic suites CI-gated. v1.1.1 (2026-05-16) fixed the broken fuzzy program resolver (PROGRAM_STOP_WORDS + substring pre-stage), stripped analytics-injected HTML chrome from `tuition.raw_prose`, and added the `list_programs_by_staff` reverse-lookup tool. v1.1.0 (2026-05-14) added the dining module (2 tools, daily-refreshed corpus, Playwright modal-click for SPA-rendered hours, status_now computation in America/Chicago). v1.0.2 (2026-05-14) fixed the calendars stdio-bundle path + Worker fail-closed Content-Length. v1.0.1 (2026-05-13) fixed online parser admissions heading match + short_description sourcing. v1.0.0 (2026-05-13) shipped the online module (4 tools). v0.9.0 tightened the prereq parser (3 accuracy gaps closed, 2 new diagnostic fields, 3 new build-time ceilings). All sources serve a pre-baked corpus snapshot — zero runtime fetches to MSU at request time on the Worker; local stdio path live-scrapes policies. For project overview, architecture, decision history, eval methodology, and open issues, see [`docs/BUILD.md`](./docs/BUILD.md). Read it once before non-trivial work.
+Tool count: **26** (4 policy + 2 calendar + 3 course + 4 emergency + 4 tuition + 5 online + 2 dining + 1 citation + 1 health). Current version: **v1.2.3** (2026-05-19) — adds the `citation_card` meta-tool — splits an answer into sentence-level claims and returns one citation card per claim across all 7 corpora (policies, calendar, courses, emergency, tuition, online, dining); each card carries source_url + last_updated + confidence, with explicit confidence='none' for un-citable claims so the model surfaces them as unverified rather than fabricating a URL. v1.2.0 (2026-05-18) adds anonymous-aggregate Worker telemetry (Cloudflare Analytics Engine, k-anonymity enforced at query time) and the v1.2.1 development branch adds the `dates` + `adversarial` eval suites with deterministic suites CI-gated. v1.1.1 (2026-05-16) fixed the broken fuzzy program resolver (PROGRAM_STOP_WORDS + substring pre-stage), stripped analytics-injected HTML chrome from `tuition.raw_prose`, and added the `list_programs_by_staff` reverse-lookup tool. v1.1.0 (2026-05-14) added the dining module (2 tools, daily-refreshed corpus, Playwright modal-click for SPA-rendered hours, status_now computation in America/Chicago). v1.0.2 (2026-05-14) fixed the calendars stdio-bundle path + Worker fail-closed Content-Length. v1.0.1 (2026-05-13) fixed online parser admissions heading match + short_description sourcing. v1.0.0 (2026-05-13) shipped the online module (4 tools). v0.9.0 tightened the prereq parser (3 accuracy gaps closed, 2 new diagnostic fields, 3 new build-time ceilings). All sources serve a pre-baked corpus snapshot — zero runtime fetches to MSU at request time on the Worker; local stdio path live-scrapes policies. For project overview, architecture, decision history, eval methodology, and open issues, see [`docs/BUILD.md`](./docs/BUILD.md). Read it once before non-trivial work.
 
 The server ships in two surfaces from one bundle:
 - **Claude Code plugin** (`/plugin install msstate-policies@msstate-mcp`)
@@ -251,6 +251,24 @@ questions to the 2 new tools.
 discipline, frozen DINING_ROOTS, Worker input-length caps, build-time
 poisoned-corpus aborts, DINING_DISCLAIMER presence, polite-scraping policy
 visible in scraper.ts source.
+
+### Corpus extension (2026-05-19) — citation card (v1.2.3)
+
+Adds 1 meta-tool (`citation_card`) over all seven existing corpora.
+No new corpus sources. Tool count 25 -> 26.
+
+**`citation_card(text, domain_hints?)`** — splits text into sentence-level
+claims, routes each to a domain via keyword heuristics (overridable via
+domain_hints — hints take priority over the router, not just for ambiguous
+claims), delegates to the per-corpus search helper, returns one
+{claim, source_url, source_title, last_updated, snippet, confidence, reason}
+card per claim. NEVER fabricates a URL — confidence='none' cards have null
+fields and explanatory `reason`. Caps: 8000 input chars, 40 claims processed.
+
+**Security checks (+8 pts, 292 -> 300):**
+- CIT1 (3 pts): router + tool files contain no fetch/require/env/fs/child_process.
+- CIT2 (3 pts): CITATION_DISCLAIMER referenced in tool + types.
+- CIT3 (2 pts): input length cap enforced via zod max(MAX_INPUT_CHARS).
 
 ### Corpus extension (2026-05-15) — online module fixes (v1.1.1)
 
