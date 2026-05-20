@@ -1709,7 +1709,7 @@ function generateBundlesWorker(
 }
 
 const PLAN_NON_GOAL_NOTES = [
-  "Plan provides no live section / seat availability data — catalog.msstate.edu does not publish term sections.",
+  "Plan does NOT check live section / seat availability — catalog.msstate.edu does not publish term sections.",
   "Plan does NOT verify degree requirement coverage — required-for-major lists are not in the catalog corpus.",
   "Plan does NOT predict admission to restricted courses (e.g., major-restricted, instructor-permission).",
 ];

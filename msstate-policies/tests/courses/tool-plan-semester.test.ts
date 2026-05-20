@@ -32,7 +32,7 @@ describe("plan_semester tool", () => {
     const r = await call({ department: "cse", completed_courses: [], target_credits_min: 6, target_credits_max: 6 });
     assert.equal(r.department, "CSE");
     assert.ok(r.candidates.length >= 1);
-    assert.ok(r.notes.some((n: string) => /no live section/i.test(n)));
+    assert.ok(r.notes.some((n: string) => /live section/i.test(n)));
     assert.ok(r.notes.some((n: string) => /degree requirement/i.test(n)));
   });
   test("excludes completed courses", async () => {
