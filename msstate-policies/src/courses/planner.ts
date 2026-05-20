@@ -18,17 +18,24 @@ export function normalizeCompleted(codes: string[]): Set<string> {
   return new Set(codes.map(normalize).filter((c) => c.length > 0));
 }
 
+/**
+ * Returns true if every prereq for `course` is satisfied by `completed`.
+ *
+ * REQUIREMENT: `completed` must be pre-normalized (uppercase, single-space).
+ * Use `normalizeCompleted(rawCodes)` before calling. The required-course
+ * codes from the catalog are normalized internally because their casing
+ * is not guaranteed.
+ */
 export function prereqsSatisfied(course: Course, completed: Set<string>): boolean {
   const p = course.prereqs;
   if (!p) return true;
   if (p.required_courses.length === 0 && p.non_course.length === 0) return true;
   if (p.non_course.length > 0) return false; // can't verify non-course gates
-  const normCompleted = new Set([...completed].map((c) => normalize(c)));
   const reqs = p.required_courses.map(normalize);
   const logic = p.logic ?? "and";
-  if (logic === "or") return reqs.some((r) => normCompleted.has(r));
+  if (logic === "or") return reqs.some((r) => completed.has(r));
   // and OR mixed -> conservative AND
-  return reqs.every((r) => normCompleted.has(r));
+  return reqs.every((r) => completed.has(r));
 }
 
 const DEPT_RE = /^[A-Z]{2,4}$/;

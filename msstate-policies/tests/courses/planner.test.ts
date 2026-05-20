@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { prereqsSatisfied } from "../../src/courses/planner.js";
+import { prereqsSatisfied, normalizeCompleted } from "../../src/courses/planner.js";
 import { filterCandidateCourses } from "../../src/courses/planner.js";
 import type { Course, Prereq } from "../../src/courses/types.js";
 
@@ -49,9 +49,12 @@ describe("prereqsSatisfied", () => {
       non_course: ["instructor approval"], raw_prose: "instr appr", parse_warnings: [] };
     assert.equal(prereqsSatisfied(c, new Set()), false);
   });
-  test("code normalization (whitespace + case)", () => {
+  test("respects pre-normalized completed set (caller must normalize)", () => {
     const c = course("CSE 2383", pr(["CSE 1284"], "and"));
-    assert.equal(prereqsSatisfied(c, new Set(["cse  1284"])), true);
+    // Caller is expected to call normalizeCompleted() first. Un-normalized
+    // input intentionally does NOT match — keeps the hot path cheap.
+    assert.equal(prereqsSatisfied(c, new Set(["cse  1284"])), false);
+    assert.equal(prereqsSatisfied(c, normalizeCompleted(["cse  1284"])), true);
   });
 });
 
