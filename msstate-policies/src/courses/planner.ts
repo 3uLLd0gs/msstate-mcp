@@ -63,7 +63,6 @@ export function filterCandidateCourses(
 import type { PlanCandidate, PlanCandidateCourse } from "./planner-types.js";
 
 const MAX_CANDIDATE_POOL = 80;
-const MAX_BUNDLE_SIZE = 5;
 const MAX_BUNDLES = 3;
 
 function numericHours(h: number | string): number {
@@ -109,6 +108,8 @@ export function generateBundles(
 
   // 1-course bundles
   for (let i = 0; i < N; i++) tryAdd([pool[i]]);
+  // Bundle size is structurally capped at 5 by the loop depth below.
+  // Changing the cap requires adding/removing loop levels.
   // 2-5-course bundles via simple nested loops; bounded by MAX_CANDIDATE_POOL.
   for (let i = 0; i < N; i++) {
     for (let j = i + 1; j < N; j++) {

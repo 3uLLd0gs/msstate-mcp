@@ -1672,6 +1672,8 @@ function generateBundlesWorker(
   }
 
   for (let i = 0; i < N; i++) tryAdd([pool[i]]);
+  // Bundle size is structurally capped at 5 by the loop depth below.
+  // Changing the cap requires adding/removing loop levels.
   for (let i = 0; i < N; i++) {
     for (let j = i + 1; j < N; j++) {
       tryAdd([pool[i], pool[j]]);
