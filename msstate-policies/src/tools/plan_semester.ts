@@ -35,7 +35,7 @@ export const plan_semester = {
     "Catalog-only semester planner. Given a `department` (2-4 letter prefix like 'CSE' / 'MA' / 'ENGL') and the student's `completed_courses` (course codes), returns up to 3 candidate bundles of courses sized to the credit-hour window (default 12-18). " +
     "Each bundle's courses are prereq-validated against `completed_courses` (conservative AND on mixed/null logic; non_course gates like 'instructor permission' exclude the course). " +
     "Optional `focus_keyword` filters on title + description (e.g., 'algorithms'). Optional `level` restricts to undergraduate or graduate. " +
-    "EXPLICIT NON-GOALS: this provides no live section / seat availability data, does NOT verify degree requirement coverage, does NOT predict admission to restricted courses. Treat output as a starting point for advising, not a registration plan. Every response surfaces these limits in the `notes` field.",
+    "EXPLICIT NON-GOALS: this does NOT check live section / seat availability, does NOT verify degree requirement coverage, does NOT predict admission to restricted courses. Treat output as a starting point for advising, not a registration plan. Every response surfaces these limits in the `notes` field.",
   inputSchema: zodToJsonSchema(Input, { target: "openApi3" }),
   zodSchema: Input,
   async handler(rawInput: unknown) {
